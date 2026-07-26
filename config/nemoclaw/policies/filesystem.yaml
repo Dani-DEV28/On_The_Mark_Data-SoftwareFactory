@@ -1,0 +1,24 @@
+# Filesystem Policy — Software Factory
+
+default: deny
+
+allow:
+  - description: Read/write to corpus repo
+    path: /workspace/corpus
+    mode: rw
+
+  - description: Read/write to kata board
+    path: /workspace/kata-board
+    mode: rw
+
+  - description: Read-only config
+    path: /workspace/config
+    mode: r
+
+  - description: Write evidence
+    path: /workspace/evidence
+    mode: w
+
+  - description: Temp files
+    path: /tmp
+    mode: rw

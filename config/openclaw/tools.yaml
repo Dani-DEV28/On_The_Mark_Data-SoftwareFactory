@@ -1,0 +1,39 @@
+# OpenClaw Agents — Tool Definitions
+# Tools available to all factory agents
+
+tools:
+  kata:
+    description: Interact with the kata board
+    commands:
+      - kata claim <id> --agent <role>
+      - kata status <id>
+      - kata advance <id> --to <status>
+      - kata list --status <status>
+      - kata create --type <feature|issue|spike> --brief "<text>"
+    output: json
+
+  git:
+    description: Git operations (DevOps+QA only)
+    restricted_to: devops-qa
+    commands:
+      - git add
+      - git commit
+      - git push
+      - git branch
+      - git merge
+      - git log
+
+  sandbox:
+    description: Sandbox execution (DevOps+QA only)
+    restricted_to: devops-qa
+    commands:
+      - sandbox exec --network-denied <command>
+      - sandbox status
+
+  fs:
+    description: File system operations
+    commands:
+      - read
+      - write
+      - list
+      - search

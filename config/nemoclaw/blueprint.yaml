@@ -1,0 +1,57 @@
+# NemoClaw Blueprint — Software Factory
+
+blueprint:
+  name: software-factory
+  version: "1.0.0"
+  description: AI software factory — 7 roles, local inference, network-denied sandbox
+
+sandbox:
+  image: openclaw
+  gpu: true
+  memory_limit: 64G
+  process_limit: 512
+  network: deny-by-default
+
+agents:
+  - name: tech-lead
+    soul: config/openclaw/agents/tech-lead/SOUL.md
+    model: gemini-4
+    permissions: [read, write]
+
+  - name: product-manager
+    soul: config/openclaw/agents/product-manager/SOUL.md
+    model: gemini-4
+    permissions: [read, write]
+
+  - name: architect
+    soul: config/openclaw/agents/architect/SOUL.md
+    model: nemotron
+    permissions: [read, write]
+
+  - name: devops-qa
+    soul: config/openclaw/agents/devops-qa/SOUL.md
+    model: nemotron
+    permissions: [read, write, git, sandbox-exec]
+
+  - name: tpm
+    soul: config/openclaw/agents/tpm/SOUL.md
+    model: gemini-4
+    permissions: [read, write]
+
+  - name: implementer
+    soul: config/openclaw/agents/implementer/SOUL.md
+    model: qwen3.6
+    permissions: [read, write]
+
+  - name: docs-engineer
+    soul: config/openclaw/agents/docs-engineer/SOUL.md
+    model: gemini-4
+    permissions: [read, write]
+
+inference:
+  provider: local-vllm
+  endpoint: http://localhost:8000/v1
+  models:
+    gemini-4: gemini-4
+    nemotron: nemotron
+    qwen3.6: qwen3.6

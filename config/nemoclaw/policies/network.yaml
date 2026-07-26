@@ -1,0 +1,18 @@
+# Network Policy — Software Factory
+# Default-deny egress. Only inference routing allowed.
+
+default: deny
+
+allow:
+  - description: Local inference via vLLM
+    destination: localhost:8000
+    protocol: http
+
+  - description: Local inference via llama-swap
+    destination: localhost:11434
+    protocol: http
+
+deny:
+  - description: Block all external network access
+    destination: "*"
+    protocol: "*"

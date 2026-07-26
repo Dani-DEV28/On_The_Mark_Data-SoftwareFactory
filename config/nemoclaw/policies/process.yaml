@@ -1,0 +1,17 @@
+# Process Policy — Software Factory
+
+limits:
+  max_processes: 512
+  max_file_descriptors: 4096
+
+blocked_syscalls:
+  - mount
+  - umount
+  - pivot_root
+  - chroot
+  - ptrace
+  - reboot
+  - sethostname
+  - setdomainname
+
+allow_privilege_escalation: false

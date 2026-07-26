@@ -1,0 +1,22 @@
+# Inference Policy — Software Factory
+# All model calls routed to local vLLM endpoint.
+
+default_provider: local-vllm
+
+providers:
+  local-vllm:
+    endpoint: http://localhost:8000/v1
+    strip_caller_credentials: true
+    inject_provider_credentials: false
+    timeout: 120
+
+  local-ollama:
+    endpoint: http://localhost:11434
+    strip_caller_credentials: true
+    inject_provider_credentials: false
+    timeout: 120
+
+routes:
+  - pattern: "*"
+    provider: local-vllm
+    fallback: local-ollama

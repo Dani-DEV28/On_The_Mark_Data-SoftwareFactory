@@ -1,5 +1,10 @@
 # Dani-PLAN.md — Software Factory MVP Build Plan
 
+> **STATUS 2026-07-26:** P0 and P1 are DONE (commit 7c9ac2e). Rule change: only
+> the LLM must be local — internet calls are allowed, so all air-gap/USB staging
+> items are dropped. agentgateway is dropped too (llama-swap routes by model
+> name; OpenShell gateway handles sandbox policy). Next: P2 orchestration.
+
 Target: **NVIDIA GB10 (DGX Spark)** — Linux/aarch64  
 Stack fallback: NemoClaw → OpenShell → OpenClaw  
 Corpus: `onthemarkdata/petri`  
@@ -10,19 +15,19 @@ Pipeline: `sfai run` → fetch issues → create katas → agents fix → close 
 
 ## P0 — Staging & Prep (done off-GB10, on laptop before hackathon)
 
-### [ ] 1. Confirm model weights on GB10
+### [x] 1. Confirm model weights on GB10 — DONE (no ~1.7B small model and no gemini-4 on disk; available: nemotron-nano-30b, nemotron-super-120b, qwen3.6-27b, qwen3.6-35b-a3b-fp8, bge-large)
 - Models already loaded into `models/` on GB10
 - Phase 1 small model (~1.7B) available for walking skeleton
 - Phase 2 models (gemini-4, nemotron, qwen3.6) also loaded
 
-### [ ] 2. Clone corpus repo
+### [x] 2. Clone corpus repo — DONE (`corpus/` = petri clone on GB10)
 ```bash
 git clone https://github.com/onthemarkdata/petri.git corpus/
 ```
 - `corpus/` is currently empty (`.gitkeep` only)
 - The petri repo is both the source of issues AND the target to fix
 
-### [ ] 3. Stage remaining binaries to `stage/`
+### [x] 3. Binaries — DONE, simplified (internet allowed; installed directly: kata v0.12.1 from kenn-io/kata release binary — NOT the abandoned PyPI `kata` package — and openclaw via npm; agentgateway dropped)
 | Binary | Source | Target |
 |--------|--------|--------|
 | `kata` | `pip install kata` | `stage/binaries/kata` |
@@ -32,7 +37,7 @@ git clone https://github.com/onthemarkdata/petri.git corpus/
 - vLLM and llama-swap already implemented — skip staging those
 - `stage/binaries/`, `stage/repos/`, `stage/weights/` are otherwise empty
 
-### [ ] 4. Create `scripts/stage-usb.sh`
+### [—] 4. ~~Create `scripts/stage-usb.sh`~~ — DROPPED (no air-gap requirement)
 - Script referenced in `PREP.md` but does not exist
 - Should rsync everything to a USB drive for air-gapped transfer to GB10
 
@@ -40,24 +45,24 @@ git clone https://github.com/onthemarkdata/petri.git corpus/
 
 ## P0 — Platform Setup (on GB10, day-of)
 
-### [ ] 5. Hardware & network
+### [x] 5. Hardware & network — DONE via Tailscale (venue Wi-Fi isolates clients in both directions; hotspot NAT also fails — tailnet is the reliable path)
 - GB10 powered, Ethernet connected
 - Tailscale auth key ready (or phone hotspot)
 - `rsync` stage folder to GB10
 
-### [ ] 6. Verify inference plane
+### [x] 6. Verify inference plane — DONE (llama-swap v243 + vLLM containers on :9292 serving all 4 models; Qwen3.6 needs `vllm/vllm-openai:latest` — its qwen3_5_moe arch is too new for the NVIDIA 26.01 image, which still serves the Nemotrons)
 - vLLM and llama-swap already implemented — confirm they're running
 - **Known gap**: `serve.sh` references `config/agentgateway.yaml` — file does not exist
 - **Fix needed**: Create `config/agentgateway.yaml` or remove the reference
 
-### [ ] 7. Install kata CLI & init board
+### [x] 7. Install kata CLI & init board — DONE (board live; smoke kata + 89 petri issues loaded)
 ```bash
 pip install kata
 kata init --with-agents
 ```
 - Creates `kata-board/` SQLite DB and `.kata.toml`
 
-### [ ] 8. Install OpenClaw
+### [x] 8. Install OpenClaw — DONE (host CLI via npm; sandbox runs OpenClaw 2026.5.27 via NemoClaw)
 ```bash
 npm install -g openclaw   # preferred
 # or
@@ -66,11 +71,11 @@ pip install openclaw      # fallback
 - Core agent framework — all 7 agents run on this
 - `setup.sh` tries NemoClaw first, then OpenShell, then OpenClaw
 
-### [ ] 9. Create `config/agentgateway.yaml`
+### [—] 9. ~~Create `config/agentgateway.yaml`~~ — DROPPED (agentgateway removed from serve.sh; llama-swap routes by model name, OpenShell gateway covers policy)
 - Referenced by `serve.sh` but missing
 - Minimal config: localhost endpoint, OTel disabled for MVP, per-role model routing
 
-### [ ] 10. Create `scripts/sfai.sh` CLI tool
+### [x] 10. Create `scripts/sfai.sh` CLI tool — DONE (run/status/help; `run` fetches GitHub issues → creates katas; hands off to orchestrate.sh when P2 lands)
 - Bash script — single entry point for the factory
 - Usage: `./sfai.sh -repo "https://github.com/onthemarkdata/petri" run`
 - Subcommands: `run`, `status`, `help`
@@ -80,7 +85,13 @@ pip install openclaw      # fallback
 
 ## P1 — Stack Setup: NemoClaw / OpenShell / OpenClaw
 
-### [ ] 11. Attempt NemoClaw (preferred)
+### [x] 11. NemoClaw — DONE. Working invocation (NOT `--provider ollama`):
+```bash
+NEMOCLAW_ONBOARD_VALIDATION_TIMEOUT_SECONDS=300 NEMOCLAW_PROVIDER=custom \
+NEMOCLAW_ENDPOINT_URL=http://172.18.0.1:9292/v1 NEMOCLAW_MODEL=qwen3.6-35b-a3b-fp8 \
+COMPATIBLE_API_KEY=unused nemoclaw onboard --non-interactive -y --no-gpu --name local-pm-os-agent
+```
+Gotchas: endpoint must use the docker-bridge IP (localhost inside a sandbox is the sandbox); pre-warm the model first — validation times out during a cold llama-swap model load.
 ```bash
 nemoclaw onboard --non-interactive --provider ollama
 ```
@@ -88,26 +99,26 @@ nemoclaw onboard --non-interactive --provider ollama
 - Automatically provisions OpenShell sandbox + OpenClaw agents
 - **Policy files already ready**: `network.yaml`, `filesystem.yaml`, `process.yaml`, `inference.yaml`
 
-### [ ] 12. Fallback: OpenShell direct
+### [—] 12. Fallback: OpenShell direct — NOT NEEDED (preferred path works)
 ```bash
 curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh
 ```
 - Manual sandbox + RBAC policies (translate from NemoClaw format)
 - No blueprint verification; loses NemoClaw lifecycle management
 
-### [ ] 13. Fallback: OpenClaw only
+### [—] 13. Fallback: OpenClaw only — NOT NEEDED
 ```bash
 openclaw agent start --name <role> --soul <path> --model auto
 ```
 - No sandbox, no RBAC — agents run natively on host
 - **Script gap**: `agents.sh` uses this syntax — needs verification against actual OpenClaw CLI
 
-### [ ] 14. Wire all 7 agents
+### [x] 14. Wire all 7 agents — DONE (7/7 via rewritten agents.sh using the real CLI `openclaw agents add <name> --model inference/qwen3.6-35b-a3b-fp8 --workspace ... --non-interactive`; the old `openclaw agent start --soul` syntax does not exist). All roles on qwen3.6-35b-a3b-fp8 — mixed per-role models would thrash llama-swap (one model loaded at a time, ~minutes per swap)
 - SOUL.md files ready: `tech-lead`, `product-manager`, `architect`, `devops-qa`, `tpm`, `implementer`, `docs-engineer`
 - `config/openclaw/tools.yaml` defines available tools (kata, git, sandbox, fs)
 - **Verify**: each agent can start, list katas, and claim work
 
-### [ ] 15. Fix `setup.sh` for air-gapped GB10
+### [x] 15. Fix `setup.sh` — DONE, simplified (no air-gap: verified install path, venv, correct corpus URL, correct onboarding env vars)
 - Current: `curl https://www.nvidia.com/nemoclaw.sh | bash` (requires internet)
 - **Need**: `--offline` flag that uses staged binaries from `stage/`
 - **Need**: venv creation for python tools (kata, agentgateway)

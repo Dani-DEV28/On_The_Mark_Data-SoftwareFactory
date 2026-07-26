@@ -1,0 +1,98 @@
+files:
+- path: petri/cli/__init__.py
+  content: "\"\"\"Typer CLI for the Petri Research Orchestration Framework.\n\n11 commands: init, seed,\
+    \ check, grow, stop, feed, inspect, launch, scan,\ngraph, connect. All commands except ``init``, ``inspect``,\
+    \ and ``launch``\nrequire a ``.petri/`` directory to exist.\n\"\"\"\n\nfrom __future__ import annotations\n\
+    \nimport typer\n\nfrom petri.cli.check import register as register_check\nfrom petri.cli.connect import\
+    \ register as register_connect\nfrom petri.cli.feed import register as register_feed\nfrom petri.cli.graph\
+    \ import register as register_graph\nfrom petri.cli.grow import register as register_grow\nfrom petri.cli.init\
+    \ import register as register_init\nfrom petri.cli.inspect import register as register_inspect\nfrom\
+    \ petri.cli.launch import register as register_launch\nfrom petri.cli.scan import register as register_scan\n\
+    from petri.cli.seed import register as register_seed\nfrom petri.cli.stop import register as register_stop\n\
+    \napp = typer.Typer(\n    name=\"petri\",\n    help=\"Petri -- colony-based research orchestration\
+    \ framework\",\n    no_args_is_help=True,\n)\n\n_COMMAND_REGISTRARS = (\n    register_init,\n    register_seed,\n\
+    \    register_check,\n    register_grow,\n    register_stop,\n    register_feed,\n    register_inspect,\n\
+    \    register_launch,\n    register_scan,\n    register_graph,\n    register_connect,\n)\n\nfor register_command\
+    \ in _COMMAND_REGISTRARS:\n    register_command(app)\n\n\ndef _version_callback(value: bool) -> None:\n\
+    \    if value:\n        from petri import __version__\n        typer.echo(f\"petri {__version__}\"\
+    )\n        raise typer.Exit()\n\n\n@app.callback()\ndef main(\n    version: bool = typer.Option(\n\
+    \        None, \"--version\", callback=_version_callback, is_eager=True,\n        help=\"Show the\
+    \ Petri version and exit.\",\n    ),\n) -> None:\n    pass\n\n\ndef main() -> None:\n    \"\"\"Entry\
+    \ point for ``python -m petri``.\"\"\"\n    app()\n\n\n__all__ = [\"app\", \"main\"]\n\n\nif __name__\
+    \ == \"__main__\":\n    main()\n"
+- path: tests/integration/test_cli.py
+  content: "\"\"\"Integration tests for the Petri CLI.\"\"\"\n\nfrom __future__ import annotations\n\n\
+    import json\n\nimport pytest\nfrom typer.testing import CliRunner\n\nfrom petri.cli import app\n\n\
+    runner = CliRunner()\n\n\n@pytest.fixture\ndef clean_dir(tmp_path, monkeypatch):\n    \"\"\"Provide\
+    \ a clean temporary directory as cwd.\"\"\"\n    monkeypatch.chdir(tmp_path)\n    return tmp_path\n\
+    \n\n# ── init ─────────────────────────────────────────────────────────────────\n\n\nclass TestInit:\n\
+    \    def test_init_creates_petri_dir(self, clean_dir):\n        result = runner.invoke(app, [\"init\"\
+    ])\n        assert result.exit_code == 0, result.output\n\n        petri_dir = clean_dir / \".petri\"\
+    \n        assert petri_dir.is_dir()\n\n        # defaults/ directory with consolidated petri.yaml\
+    \ + constitution\n        defaults = petri_dir / \"defaults\"\n        assert defaults.is_dir()\n\
+    \        assert (defaults / \"petri.yaml\").is_file()\n        assert (defaults / \"constitution.md\"\
+    ).is_file()\n\n        # petri-dishes/ directory\n        assert (petri_dir / \"petri-dishes\").is_dir()\n\
+    \n        # queue.json with valid JSON\n        queue_path = petri_dir / \"queue.json\"\n        assert\
+    \ queue_path.is_file()\n        queue = json.loads(queue_path.read_text())\n        assert \"version\"\
+    \ in queue\n        assert \"entries\" in queue\n\n    def test_init_with_name(self, clean_dir):\n\
+    \        result = runner.invoke(app, [\"init\", \"--name\", \"my-research\"])\n        assert result.exit_code\
+    \ == 0, result.output\n\n        config_text = (clean_dir / \".petri\" / \"defaults\" / \"petri.yaml\"\
+    ).read_text()\n        assert \"my-research\" in config_text\n\n    def test_init_already_exists(self,\
+    \ clean_dir):\n        first = runner.invoke(app, [\"init\"])\n        assert first.exit_code == 0,\
+    \ first.output\n\n        second = runner.invoke(app, [\"init\"])\n        assert second.exit_code\
+    \ == 1, second.output\n        assert \"already\" in second.output.lower()\n\n\n# ── seed coverage\
+    \ lives in tests/integration/test_seed_wizard.py ─────────\n\n\n# ── check ────────────────────────────────────────────────────────────────\n\
+    #\n# These tests use the canonical ``seeded_petri_dir`` fixture from\n# tests/conftest.py — a real\
+    \ .petri/ directory laid out on disk with the\n# canonical 5-cell diamond colony pre-serialized. They\
+    \ never call\n# ``petri seed`` (which now requires the real Claude Code CLI) and never\n# monkeypatch\
+    \ the inference provider.\n\n\nclass TestCheck:\n    def test_check_shows_cells(self, seeded_petri_dir):\n\
+    \        result = runner.invoke(app, [\"check\"])\n        assert result.exit_code == 0, result.output\n\
+    \n        out = result.output\n        assert \"Level 0\" in out\n        assert \"Level 1\" in out\n\
+    \        assert \"Level 2\" in out\n        assert \"NEW\" in out\n\n    def test_check_json_output(self,\
+    \ seeded_petri_dir):\n        result = runner.invoke(app, [\"check\", \"--json\"])\n        assert\
+    \ result.exit_code == 0, result.output\n\n        data = json.loads(result.output)\n        assert\
+    \ isinstance(data, list)\n        # Canonical diamond has 5 cells\n        assert len(data) == 5\n\
+    \n\n# ── graph ────────────────────────────────────────────────────────────────\n\n\nclass TestGraph:\n\
+    \    def test_graph(self, seeded_petri_dir):\n        result = runner.invoke(app, [\"graph\"])\n \
+    \       assert result.exit_code == 0, result.output\n\n        out = result.output\n        # Composite\
+    \ IDs contain hyphens\n        assert \"-\" in out\n        # The canonical colony's center claim\n\
+    \        assert \"Central thesis\" in out\n        # Level markers\n        assert \"L0\" in out or\
+    \ \"L1\" in out or \"L2\" in out\n\n    def test_graph_dot_format(self, seeded_petri_dir):\n     \
+    \   result = runner.invoke(\n            app, [\"graph\", \"--format\", \"dot\"]\n        )\n    \
+    \    assert result.exit_code == 0, result.output\n        assert \"digraph\" in result.output\n\n\n\
+    # ── full flow ────────────────────────────────────────────────────────────\n\n\nclass TestFullFlow:\n\
+    \    def test_full_flow(self, seeded_petri_dir):\n        # check\n        r = runner.invoke(app,\
+    \ [\"check\", \"--json\"])\n        assert r.exit_code == 0, r.output\n        check_data = json.loads(r.output)\n\
+    \        check_count = len(check_data)\n        assert check_count == 5  # canonical diamond\n\n \
+    \       # graph\n        r = runner.invoke(app, [\"graph\"])\n        assert r.exit_code == 0, r.output\n\
+    \n        # Cell count consistency: check should report the same number\n        # of cells as live\
+    \ in the colony directory.\n        dishes_dir = seeded_petri_dir[\"petri_dir\"] / \"petri-dishes\"\
+    \n        colony_dirs = [d for d in dishes_dir.iterdir() if d.is_dir()]\n        assert len(colony_dirs)\
+    \ == 1\n\n        metadata_files = list(colony_dirs[0].rglob(\"metadata.json\"))\n        assert len(metadata_files)\
+    \ == check_count\n\n\n# ── on-disk integrity (SC-002) ──────────────────────────────────────────\n\
+    \n\nclass TestColonyOnDiskIntegrity:\n    \"\"\"Verify the canonical seeded layout is structurally\
+    \ sound.\n\n    This is what survived from the old TestConcurrency: the parts that\n    don't require\
+    \ running ``petri grow`` (which now needs the real Claude\n    Code CLI in preflight). The state-machine\
+    \ + file-locking concurrency\n    behaviour is exercised by tests under ``tests/unit/test_queue.py``\
+    \ and\n    ``tests/integration/test_processor*.py`` against the engine directly,\n    not via the\
+    \ CLI.\n    \"\"\"\n\n    def test_seeded_dir_structure_is_valid(self, seeded_petri_dir):\n      \
+    \  petri_dir = seeded_petri_dir[\"petri_dir\"]\n        colony_dir = seeded_petri_dir[\"colony_path\"\
+    ]\n\n        metadata_files = sorted(colony_dir.rglob(\"metadata.json\"))\n        cell_dirs = [mf.parent\
+    \ for mf in metadata_files]\n        # Canonical diamond has 5 cells\n        assert len(cell_dirs)\
+    \ == 5\n\n        for cell_path in cell_dirs:\n            meta_path = cell_path / \"metadata.json\"\
+    \n            assert meta_path.is_file(), f\"Missing metadata: {cell_path.name}\"\n\n            meta\
+    \ = json.loads(meta_path.read_text())\n            assert \"id\" in meta, f\"metadata missing 'id'\
+    \ in {cell_path.name}\"\n\n        # queue.json must be present, valid JSON, and have an entry per\
+    \ cell\n        queue_path = petri_dir / \"queue.json\"\n        queue = json.loads(queue_path.read_text())\n\
+    \        assert \"entries\" in queue\n        assert \"version\" in queue\n        assert len(queue[\"\
+    entries\"]) == 5\n\n\n# ── version ──────────────────────────────────────────────────────────────\n\
+    \n\nclass TestVersion:\n    def test_version_flag(self):\n        result = runner.invoke(app, [\"\
+    --version\"])\n        assert result.exit_code == 0, result.output\n        assert \"petri\" in result.output\n\
+    \        from petri import __version__\n        assert __version__ in result.output\n"
+notes: Added an eager --version callback to the Typer app in petri/cli/__init__.py. The callback imports
+  petri.__version__ lazily, prints it in the format "petri <version>", and raises typer.Exit() to terminate
+  immediately without parsing subcommands. Added an integration test in tests/integration/test_cli.py
+  that verifies the exit code is 0, the output contains "petri", and matches the actual __version__ string.
+test_command: uv run pytest tests/integration/test_cli.py::TestVersion -v
+_commit: '6182778'
+_branch: factory/asjx

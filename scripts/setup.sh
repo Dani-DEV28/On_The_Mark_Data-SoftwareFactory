@@ -1,110 +1,76 @@
 #!/usr/bin/env bash
-# Software Factory — Full Stack Setup (GB10)
-# Verified against the working 2026-07-26 hackathon setup.
+# Software Factory — Full Stack Setup
 # Usage: ./scripts/setup.sh
-#
-# Notes from the working install:
-# - NemoClaw is a git checkout (~/hack/repos/NemoClaw) npm-linked as `nemoclaw`,
-#   not a curl installer. The openshell CLI lives in the ~/hack/.venv virtualenv.
-# - Onboarding MUST use provider=custom with the llama-swap endpoint on the
-#   docker bridge IP — localhost inside a sandbox is the sandbox itself.
-# - kata is kenn-io/kata (katatracker.com), NOT the abandoned `kata` package on PyPI.
 
 set -euo pipefail
 
 FACTORY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-VENV="${FACTORY_VENV:-$HOME/hack/.venv}"
-CORPUS_URL="${CORPUS_URL:-https://github.com/onthemarkdata/petri.git}"
-INFERENCE_URL="${INFERENCE_URL:-http://172.18.0.1:9292/v1}"
-FACTORY_MODEL="${FACTORY_MODEL:-qwen3.6-35b-a3b-fp8}"
-KATA_VERSION="${KATA_VERSION:-0.12.1}"
-
 echo "=== Software Factory Setup ==="
 echo "Factory dir: $FACTORY_DIR"
 
-# 1. Prerequisites
+# 1. Check prerequisites
 echo ""
 echo "--- Checking Prerequisites ---"
-for cmd in python3 git docker node npm; do
-    command -v "$cmd" >/dev/null 2>&1 || { echo "ERROR: $cmd not found"; exit 1; }
-done
+command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 not found"; exit 1; }
+command -v git >/dev/null 2>&1 || { echo "ERROR: git not found"; exit 1; }
 
-# 2. Python venv (openshell + python tooling)
+# 2. Try NemoClaw first (preferred)
 echo ""
-echo "--- Python venv ---"
-if [ ! -d "$VENV" ]; then
-    python3 -m venv "$VENV"
-    echo "Created venv at $VENV"
-fi
-# shellcheck disable=SC1091
-source "$VENV/bin/activate"
-
-# 3. NemoClaw (preferred stack: NemoClaw -> OpenShell -> OpenClaw)
-echo ""
-echo "--- NemoClaw ---"
+echo "--- Attempting NemoClaw Install ---"
 if command -v nemoclaw >/dev/null 2>&1; then
-    echo "NemoClaw present: $(nemoclaw --version 2>/dev/null | head -1)"
+    echo "NemoClaw already installed, running onboard..."
+    nemoclaw onboard --non-interactive --provider ollama || true
+elif curl -fsSL https://www.nvidia.com/nemoclaw.sh | bash 2>/dev/null; then
+    echo "NemoClaw installed successfully"
+    nemoclaw onboard --non-interactive --provider ollama || true
 else
-    echo "NemoClaw not found. Install from the repo checkout:"
-    echo "  cd ~/hack/repos/NemoClaw && npm install && npm link"
-    exit 1
+    echo "NemoClaw install failed, falling back to OpenShell..."
+
+    # 3. Try OpenShell direct (fallback)
+    echo ""
+    echo "--- Attempting OpenShell Install ---"
+    if command -v openshell >/dev/null 2>&1; then
+        echo "OpenShell already installed"
+    elif curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh 2>/dev/null; then
+        echo "OpenShell installed successfully"
+    else
+        echo "OpenShell install failed, falling back to OpenClaw only..."
+    fi
+
+    # 4. Install OpenClaw (always needed)
+    echo ""
+    echo "--- Installing OpenClaw ---"
+    if command -v openclaw >/dev/null 2>&1; then
+        echo "OpenClaw already installed"
+    else
+        npm install -g openclaw 2>/dev/null || pip install openclaw 2>/dev/null || {
+            echo "WARNING: OpenClaw install failed — manual setup required"
+        }
+    fi
 fi
 
-# 4. OpenClaw on the host (agents inside the sandbox already have it)
+# 5. Install kata CLI
 echo ""
-echo "--- OpenClaw (host CLI) ---"
-if command -v openclaw >/dev/null 2>&1; then
-    echo "OpenClaw already installed"
-else
-    npm install -g openclaw
-fi
-
-# 5. kata CLI (kenn-io/kata — verified release binary)
-echo ""
-echo "--- Kata ---"
-if command -v kata >/dev/null 2>&1 && kata version >/dev/null 2>&1; then
+echo "--- Installing Kata ---"
+if command -v kata >/dev/null 2>&1; then
     echo "Kata already installed"
 else
-    arch="$(uname -m)"; case "$arch" in aarch64|arm64) karch=arm64;; *) karch=amd64;; esac
-    base="https://github.com/kenn-io/kata/releases/download/v${KATA_VERSION}"
-    tmp="$(mktemp -d)"
-    curl -fsSLO --output-dir "$tmp" "$base/kata_${KATA_VERSION}_linux_${karch}.tar.gz"
-    curl -fsSLO --output-dir "$tmp" "$base/SHA256SUMS"
-    (cd "$tmp" && grep "linux_${karch}.tar.gz" SHA256SUMS | sha256sum -c - && tar xzf "kata_${KATA_VERSION}_linux_${karch}.tar.gz")
-    mkdir -p "$HOME/.local/bin" && mv "$tmp/kata" "$HOME/.local/bin/kata" && chmod +x "$HOME/.local/bin/kata"
-    rm -rf "$tmp"
-    echo "Kata v${KATA_VERSION} installed to ~/.local/bin/kata"
+    pip install kata 2>/dev/null || {
+        echo "WARNING: Kata install failed — manual setup required"
+    }
 fi
 
-# 6. Corpus repo (petri — source of issues AND target to fix)
+# 6. Clone corpus repo
 echo ""
-echo "--- Corpus (petri) ---"
+echo "--- Cloning Corpus Repo ---"
 if [ ! -d "$FACTORY_DIR/corpus/.git" ]; then
-    git clone "$CORPUS_URL" "$FACTORY_DIR/corpus"
+    git clone https://github.com/pallets/click.git "$FACTORY_DIR/corpus" 2>/dev/null || {
+        echo "WARNING: Corpus clone failed — check network"
+    }
 else
     echo "Corpus already cloned"
 fi
 
-# 7. Kata board
-echo ""
-echo "--- Kata board ---"
-if [ ! -f "$FACTORY_DIR/.kata.toml" ]; then
-    (cd "$FACTORY_DIR" && kata init --with-agents)
-else
-    echo "Kata board already initialized"
-fi
-
-# 8. NemoClaw onboarding against llama-swap
-echo ""
-echo "--- NemoClaw onboarding ---"
-NEMOCLAW_PROVIDER=custom \
-NEMOCLAW_ENDPOINT_URL="$INFERENCE_URL" \
-NEMOCLAW_MODEL="$FACTORY_MODEL" \
-COMPATIBLE_API_KEY=unused \
-nemoclaw onboard --non-interactive -y --no-gpu --name local-pm-os-agent || {
-    echo "WARNING: onboarding failed — run manually with --fresh"
-}
-
 echo ""
 echo "=== Setup Complete ==="
-echo "Next: ./scripts/serve.sh (serving plane), then ./scripts/agents.sh (wire agents)"
+echo "Next: run ./scripts/serve.sh to start the serving plane"

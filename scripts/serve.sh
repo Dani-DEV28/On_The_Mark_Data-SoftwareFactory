@@ -1,51 +1,53 @@
 #!/usr/bin/env bash
 # Software Factory — Start Serving Plane
-# llama-swap is the single OpenAI-compatible endpoint (:9292).
-# It launches/evicts vLLM docker containers on demand per model —
-# vLLM is NOT started directly, and agentgateway is not used
-# (llama-swap routes by model name; OpenShell gateway handles sandbox policy).
 # Usage: ./scripts/serve.sh
 
 set -euo pipefail
 
 FACTORY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG="$FACTORY_DIR/config/llama-swap/config.yaml"
-LISTEN="${LLAMA_SWAP_LISTEN:-:9292}"
-SWAP_BIN="$(command -v llama-swap || echo "$HOME/llama-swap/llama-swap")"
 
 echo "=== Starting Serving Plane ==="
 
-if ! command -v docker >/dev/null 2>&1; then
-    echo "ERROR: docker is required (vLLM models run in containers)" >&2
-    exit 1
-fi
-
-if [ ! -x "$SWAP_BIN" ]; then
-    echo "ERROR: llama-swap not found (looked in PATH and ~/llama-swap/)" >&2
-    exit 1
-fi
-
-if curl -sf "http://localhost${LISTEN#:*}/v1/models" >/dev/null 2>&1 \
-   || curl -sf "http://localhost:${LISTEN##*:}/v1/models" >/dev/null 2>&1; then
-    echo "llama-swap already running on $LISTEN — nothing to do"
+# 1. Start vLLM
+echo "--- Starting vLLM ---"
+if command -v vllm >/dev/null 2>&1; then
+    vllm serve --config "$CONFIG" &
+    VLLM_PID=$!
+    echo "vLLM started (PID: $VLLM_PID)"
 else
-    nohup "$SWAP_BIN" --config "$CONFIG" --listen "$LISTEN" \
-        > "$FACTORY_DIR/llama-swap.log" 2>&1 &
+    echo "WARNING: vLLM not found — trying Ollama fallback"
+    ollama serve &
+    OLLAMA_PID=$!
+    echo "Ollama started (PID: $OLLAMA_PID)"
+fi
+
+# 2. Start llama-swap
+echo "--- Starting llama-swap ---"
+if command -v llama-swap >/dev/null 2>&1; then
+    llama-swap --config "$CONFIG" &
     SWAP_PID=$!
-    sleep 2
-    if kill -0 "$SWAP_PID" 2>/dev/null; then
-        echo "llama-swap started (PID: $SWAP_PID, log: llama-swap.log)"
-    else
-        echo "ERROR: llama-swap failed to start — see llama-swap.log" >&2
-        exit 1
-    fi
+    echo "llama-swap started (PID: $SWAP_PID)"
+else
+    echo "WARNING: llama-swap not found — using direct vLLM endpoint"
+fi
+
+# 3. Start agentgateway (optional)
+echo "--- Starting agentgateway ---"
+if command -v agentgateway >/dev/null 2>&1; then
+    agentgateway --config "$FACTORY_DIR/config/agentgateway.yaml" &
+    GW_PID=$!
+    echo "agentgateway started (PID: $GW_PID)"
+else
+    echo "WARNING: agentgateway not found — roles will call llama-swap directly"
 fi
 
 echo ""
 echo "=== Serving Plane Ready ==="
-echo "Endpoint (host):        http://localhost:${LISTEN##*:}/v1"
-echo "Endpoint (sandboxes):   http://172.18.0.1:${LISTEN##*:}/v1"
-echo "Models:"
-curl -s "http://localhost:${LISTEN##*:}/v1/models" \
-    | python3 -c 'import json,sys; [print("  -", m["id"]) for m in json.load(sys.stdin)["data"]]' \
-    2>/dev/null || echo "  (endpoint not answering yet)"
+echo "vLLM:    http://localhost:8000/v1"
+echo "Ollama:  http://localhost:11434"
+echo "Gateway: http://localhost:9000"
+echo ""
+echo "Press Ctrl+C to stop all services"
+
+wait

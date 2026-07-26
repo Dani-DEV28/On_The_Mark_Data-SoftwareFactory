@@ -1,0 +1,12 @@
+# Stop conditions — enforced by the TPM (scripts/stop-gap.sh), not the Tech Lead.
+# The TPM halts a kata (or the whole factory) when any limit is reached and
+# generates a Factory Incident Report under evidence/incidents/.
+stop_conditions:
+  max_attempts: 5            # total implementation retries on a kata
+  max_runtime: 45m           # wall-clock limit per kata (from first gate action)
+  no_progress_cycles: 4      # heartbeat ticks with no status change
+  identical_failures: 3      # same QA failure signature repeated
+  max_failed_agents: 2       # distinct agents that have failed on the kata
+
+# Manual override: create a kata titled "[stop] <reason>" on the board.
+# The TPM sees it at every check and halts the whole pipeline.

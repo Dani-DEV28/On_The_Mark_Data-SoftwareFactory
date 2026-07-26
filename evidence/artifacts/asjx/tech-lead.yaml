@@ -1,0 +1,19 @@
+analysis: The CLI currently lacks a `--version` flag, preventing users from quickly verifying their installed
+  version. The version string is already exposed via `petri.__version__` (backed by setuptools-scm). We
+  need to wire this into the Typer app using an eager callback so it intercepts before any subcommand
+  parsing or project initialization. This is a straightforward CLI enhancement with no architectural impact.
+type: feature
+needs_architect: false
+affected_files:
+- petri/cli/__init__.py
+- tests/integration/test_cli.py
+task:
+  title: Wire `petri --version` into the CLI
+  objective: Add a top-level `--version` flag to the Typer app that prints the version string and exits
+    immediately, with a corresponding integration test.
+  constraints:
+  - Use `@app.callback()` with a `--version` option (`is_eager=True`, `callback=...`).
+  - Callback must import `petri.__version__` lazily, print `f'petri {__version__}'`, and raise `typer.Exit()`.
+  - Test in `tests/integration/test_cli.py` using Typer's `CliRunner`; assert output contains the version
+    string.
+  - Keep it offline; no network or project directory required.

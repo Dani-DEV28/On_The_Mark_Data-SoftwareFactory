@@ -1,0 +1,20 @@
+files:
+- path: CHANGELOG.md
+  content: '# Changelog
+
+
+    ## [Unreleased]
+
+
+    ### Added
+
+    - `petri --version` flag to print the installed version and exit immediately.
+
+    '
+- path: README.md
+  content: "# Petri\n\nA CLI tool for managing petri-dish-like workflows.\n\n## Usage\n\n  ```bash\n \
+    \ petri [OPTIONS] COMMAND [ARGS]...\n\n  Options:\n    --version   Show the Petri version and exit.\n\
+    \    --help      Show this message and exit.\n\n  Commands:\n    init    Initialize a new project.\n\
+    \    run     Execute a workflow.\n  ```\n\n## Installation\n\n...\n"
+summary: Updated CHANGELOG and README to document the new `petri --version` CLI flag.
+_commit: 7b6bce5

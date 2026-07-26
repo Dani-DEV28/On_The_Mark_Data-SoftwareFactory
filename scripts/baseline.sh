@@ -1,60 +1,17 @@
 #!/usr/bin/env bash
-# Software Factory — Run Lone-Agent Baseline
-# Usage: ./scripts/baseline.sh "Brief description"
-
+# Baseline comparison (plan #23): one generalist agent, no org, no gates —
+# same kata, so cycle time / quality / tokens compare against the factory.
+# Usage: ./scripts/baseline.sh --kata <id>   (or -repo <url> --kata <id>)
 set -euo pipefail
-
 FACTORY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BRIEF="${1:?Usage: baseline.sh \"Brief description\"}"
-OUTPUT_DIR="$FACTORY_DIR/evidence/baseline"
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-OUTPUT_FILE="$OUTPUT_DIR/baseline-$TIMESTAMP.md"
-
-echo "=== Running Baseline (Lone Agent) ==="
-echo "Brief: $BRIEF"
-echo "Output: $OUTPUT_FILE"
-
-mkdir -p "$OUTPUT_DIR"
-
-# Run a single agent with no org — same brief, no roles
-START_TIME=$(date +%s)
-
-cat > "$OUTPUT_FILE" << EOF
-# Baseline Run — $TIMESTAMP
-
-## Brief
-$BRIEF
-
-## Setup
-- Single agent, no org chart
-- No kata board
-- No role separation
-- Direct model call (same model as factory implementer)
-
-## Execution
-$(date): Started
-$(date): Processing...
-
-## Results
-- [ ] Code written
-- [ ] Tests written
-- [ ] Tests passing
-- [ ] Documentation written
-
-## Metrics
-- Cycle time: TBD
-- Tokens used: TBD
-- Human interventions: TBD
-- Issues found: TBD
-
-## Comparison
-See evidence/factory/ for factory run on same brief.
-EOF
-
-END_TIME=$(date +%s)
-ELAPSED=$((END_TIME - START_TIME))
-
-echo ""
-echo "=== Baseline Complete ==="
-echo "Elapsed: ${ELAPSED}s"
-echo "Output: $OUTPUT_FILE"
+export FACTORY_DIR
+KATA=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --kata) KATA="$2"; shift 2 ;;
+        -repo|--repo) shift 2 ;;   # accepted for plan-compat; corpus already cloned
+        *) shift ;;
+    esac
+done
+[ -n "$KATA" ] || { echo "Usage: $0 --kata <id>"; exit 1; }
+exec python3 "$FACTORY_DIR/scripts/factory/factory.py" baseline --kata "$KATA"

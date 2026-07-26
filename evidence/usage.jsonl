@@ -8,3 +8,9 @@
 {"ts": "2026-07-26T23:36:18.647152+00:00", "kata": "rqx1", "role": "tech-lead", "prompt_tokens": 2242, "completion_tokens": 1384, "seconds": 37.0}
 {"ts": "2026-07-26T23:36:26.380783+00:00", "kata": "artifact-ui-test", "role": "tech-lead", "prompt_tokens": 2369, "completion_tokens": 3396, "seconds": 159.4}
 {"ts": "2026-07-26T23:37:05.081082+00:00", "kata": "rqx1", "role": "tech-lead", "prompt_tokens": 2311, "completion_tokens": 2166, "seconds": 46.4}
+{"ts": "2026-07-26T23:38:31.515220+00:00", "kata": "rqx1", "role": "product-manager", "prompt_tokens": 1001, "completion_tokens": 4118, "seconds": 85.8}
+{"ts": "2026-07-26T23:40:32.971780+00:00", "kata": "aac7", "role": "product-manager", "prompt_tokens": 1833, "completion_tokens": 5780, "seconds": 121.2}
+{"ts": "2026-07-26T23:41:30.927807+00:00", "kata": "aac7", "role": "architect", "prompt_tokens": 2643, "completion_tokens": 2541, "seconds": 57.3}
+{"ts": "2026-07-26T23:42:17.863562+00:00", "kata": "artifact-panel-test", "role": "tech-lead", "prompt_tokens": 2368, "completion_tokens": 2244, "seconds": 61.6}
+{"ts": "2026-07-26T23:43:06.645691+00:00", "kata": "aac7", "role": "architect", "prompt_tokens": 2716, "completion_tokens": 3733, "seconds": 95.6}
+{"ts": "2026-07-26T23:43:37.613712+00:00", "kata": "artifact-tty-test", "role": "tech-lead", "prompt_tokens": 2366, "completion_tokens": 2148, "seconds": 58.4}

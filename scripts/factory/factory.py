@@ -103,12 +103,36 @@ ROLE_ICON = {
 }
 
 
+TEAM = ["tech-lead", "product-manager", "architect", "implementer",
+        "devops-qa", "docs-engineer", "tpm"]
+TEAM_STATE = os.path.join(EVIDENCE, "team-state.json")
+
+
+def _team_state():
+    try:
+        with open(TEAM_STATE) as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_team_state(state):
+    try:
+        os.makedirs(EVIDENCE, exist_ok=True)
+        with open(TEAM_STATE, "w") as f:
+            json.dump(state, f)
+    except OSError:
+        pass
+
+
 class AgentView:
-    """Live spinner line for one agent turn: role, tokens, tok/s, elapsed,
-    and a rolling tail of what the agent is generating. Falls back to plain
-    log lines when stdout is not a TTY (nohup / logs)."""
+    """Full-team terminal panel: all 7 roles are always visible; the active
+    one animates with a live token stream, the rest show their last completed
+    work (persisted across processes via evidence/team-state.json).
+    Falls back to plain log lines when stdout is not a TTY (nohup / logs)."""
 
     FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    HEIGHT = len(TEAM) + 1  # header + one row per role
 
     def __init__(self, role, kata_id, verb="working"):
         self.role, self.kata, self.verb = role, kata_id, verb
@@ -119,6 +143,24 @@ class AgentView:
         self._i = 0
         self._thread = None
         self._lock = threading.Lock()
+        self._drawn = False
+        self.last = _team_state()
+        # Snapshot each role's queue once per agent turn (cheap; not per-frame).
+        role_gate = {"tech-lead": "gate:intaken", "product-manager": "gate:scoped",
+                     "architect": "gate:designed", "implementer": "gate:implementing",
+                     "devops-qa": "gate:qa", "docs-engineer": "gate:documenting"}
+        self.queue = {}
+        if IS_TTY:
+            for r, lbl in role_gate.items():
+                try:
+                    self.queue[r] = len(kata_list(label=lbl))
+                except Exception:  # noqa: BLE001
+                    self.queue[r] = None
+            try:
+                self.queue["tech-lead"] = (self.queue.get("tech-lead") or 0) + \
+                    len(kata_list(label="gate:tl-review"))
+            except Exception:  # noqa: BLE001
+                pass
 
     def start(self):
         if IS_TTY:
@@ -131,37 +173,70 @@ class AgentView:
     def feed(self, delta):
         with self._lock:
             self.tok += 1
-            self.tail = (self.tail + delta).replace("\n", "⏎ ")[-64:]
+            self.tail = (self.tail + delta).replace("\n", "⏎ ")[-46:]
 
     def note(self, text):
         with self._lock:
-            self.tail = text[-64:]
+            self.tail = text[-46:]
+
+    def _row(self, role, frame):
+        icon = ROLE_ICON.get(role, "•")
+        if role == self.role:
+            el = time.time() - self.t0
+            rate = self.tok / el if el > 0.5 else 0
+            with self._lock:
+                tail = self.tail
+            return (f"{frame} {icon} \x1b[1m{role:<16}\x1b[0m {self.verb} on "
+                    f"\x1b[1m{self.kata}\x1b[0m  {self.tok:>5} tok {rate:5.1f} tok/s "
+                    f"{el:4.0f}s \x1b[2m{tail}\x1b[0m")
+        q = self.queue.get(role)
+        if role == "tpm":
+            queue_s = "watching (stop-check every gate)"
+        elif q is None:
+            queue_s = ""
+        elif q == 0:
+            queue_s = "queue empty"
+        else:
+            queue_s = f"\x1b[0m\x1b[33m{q} queued\x1b[0m\x1b[2m"
+        info = self.last.get(role)
+        if info:
+            age = int(time.time() - info.get("ts", 0))
+            age_s = f"{age // 60}m ago" if age >= 60 else f"{age}s ago"
+            return (f"  {icon} \x1b[2m{role:<16} {queue_s} · "
+                    f"last ✓ {info.get('msg', '')[:44]} ({age_s})\x1b[0m")
+        return f"  {icon} \x1b[2m{role:<16} idle · {queue_s}\x1b[0m"
+
+    def _render(self, frame):
+        hdr = (f"\x1b[1m── factory team ──\x1b[0m {now().strftime('%H:%M:%S')} "
+               f"(one agent runs at a time — single local model)")
+        lines = [hdr] + [self._row(r, frame) for r in TEAM]
+        out = (f"\x1b[{self.HEIGHT}F" if self._drawn else "")
+        out += "".join("\x1b[K" + l[:180] + "\n" for l in lines)
+        sys.stdout.write(out)
+        sys.stdout.flush()
+        self._drawn = True
 
     def _spin(self):
         while not self._stop.is_set():
             f = self.FRAMES[self._i % len(self.FRAMES)]
             self._i += 1
-            el = time.time() - self.t0
-            rate = self.tok / el if el > 0.5 else 0
-            with self._lock:
-                tail = self.tail
-            icon = ROLE_ICON.get(self.role, "•")
-            line = (f"\r\x1b[K{f} {icon} \x1b[1m{self.role:<16}\x1b[0m {self.kata}"
-                    f"  {self.tok:>5} tok  {rate:5.1f} tok/s  {el:5.0f}s  \x1b[2m{tail}\x1b[0m")
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            time.sleep(0.12)
+            self._render(f)
+            time.sleep(0.15)
 
     def done(self, msg=""):
         self._stop.set()
         if self._thread:
-            self._thread.join(timeout=0.5)
+            self._thread.join(timeout=0.6)
         el = time.time() - self.t0
-        icon = ROLE_ICON.get(self.role, "•")
+        summary = f"{self.kata}: {msg}  {self.tok} tok {el:.0f}s"
+        self.last[self.role] = {"msg": summary, "ts": time.time()}
+        _save_team_state(self.last)
         if IS_TTY:
-            sys.stdout.write("\r\x1b[K")
+            self._render("✓")
+        icon = ROLE_ICON.get(self.role, "•")
         line = f"✓ {icon} {self.role:<16} {self.kata}  {self.tok} tok  {el:.0f}s  {msg}"
-        print(line, flush=True)
+        if not IS_TTY:
+            print(line, flush=True)
         file_log(f"[{now().strftime('%H:%M:%S')}] {line}")
 
 

@@ -1,2 +1,4 @@
 {"ts": "2026-07-26T23:26:33.013238+00:00", "event": "Intaken", "detail": ""}
 {"ts": "2026-07-26T23:35:41.319559+00:00", "event": "Analysis Complete", "detail": ""}
+{"ts": "2026-07-26T23:40:33.008119+00:00", "event": "Planning Complete", "detail": ""}
+{"ts": "2026-07-26T23:43:06.694802+00:00", "event": "architect Failed", "detail": "architect produced invalid artifact: mapping values are not allowed here\n  in \"<unicode string>\", line 51, column 50:\n     ... : Correctly handling `stopReason: error` channel.\n                                         ^"}

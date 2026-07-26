@@ -1,0 +1,59 @@
+subtasks:
+- order: 1
+  title: Implement Error Taxonomy and Retry Core
+  depends_on: none
+  acceptance_criteria:
+  - Typed failure vocabulary defined and exported for transport mapping
+  - Retry core implements configurable backoff and max attempts
+  - Shared module imported successfully by claude-code adapter
+  - Unit tests cover all failure types and retry scenarios
+- order: 2
+  title: Create Fake PI Stub and Testing Tiers
+  depends_on: none
+  acceptance_criteria:
+  - Offline stub implements LF-JSONL framing and serial command execution
+  - Test tiers (unit, integration, e2e) configured to run against stub
+  - Stub supports deterministic response injection for validation
+  - All transport tests pass against stub without network calls
+- order: 3
+  title: Build PI RPC Transport and PiModel Wrapper
+  depends_on:
+  - Implement Error Taxonomy and Retry Core
+  - Create Fake PI Stub and Testing Tiers
+  acceptance_criteria:
+  - Transport spawns `pi --mode rpc` and maintains long-lived session
+  - LF-JSONL framing correctly parses request/response streams
+  - Error mapping converts transport failures to taxonomy types
+  - PiModel implements pydantic-ai `Model` interface with request mapping
+  - Tool policy, structured output, and usage/cost capture implemented
+  - 'Handles `message.stopReason: error` channel correctly'
+- order: 4
+  title: Wire Harness Resolution, Bridge, and CLI Integration
+  depends_on:
+  - Build PI RPC Transport and PiModel Wrapper
+  acceptance_criteria:
+  - '`harness:` block resolves to PiModel instance'
+  - '`check_pi()` preflight validates environment and protocol'
+  - '`petri init` defaults updated to use pi harness'
+  - Four decomposition-path methods on pydantic-ai Agents implemented
+  - assess_cell verdict discipline and match_evidence logic enforced
+  - CLI wiring connects harness to engine and agent lifecycle
+  - 'Integration test #27 passes on pi-backed dish'
+acceptance_criteria:
+- 'End-to-end flow: `petri seed` -> `petri grow` executes successfully on pi-backed dish'
+- All error channels (including command-success/generation-failure) are captured and mapped
+- Usage and dollar cost are accurately captured on every assistant message
+- No regressions in existing adapters, CLI, or engine tests
+- Documentation updated with harness configuration and troubleshooting guide
+edge_cases:
+- RPC session drops or `pi` process exits unexpectedly during long generation
+- Malformed LF-JSONL frames or partial writes in transport stream
+- 'Command returns success but generation fails (`stopReason: error`)'
+- Concurrent requests submitted (transport must serialize or reject)
+- Usage/cost parsing fails due to unexpected API response format
+- Preflight check fails due to missing `pi` binary or version mismatch
+definition_of_done: 'All four subtasks merged, sub-issues #18, #20, #21, #22, #25, #26, #27 closed, integration
+  test #27 passes on a pi-backed dish, PR #119 protocol contract fully implemented, and no new external
+  dependencies or network calls introduced. Scope tradeoff: If time is constrained, defer `petri init`
+  default flip and advanced usage/cost parsing to a follow-up kata; core transport, model, and CLI wiring
+  remain in scope.'

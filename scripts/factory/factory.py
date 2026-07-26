@@ -231,7 +231,14 @@ def agent_yaml(role, system, user, kata_id, schema_keys, max_tokens=8192):
 def soul(role):
     path = os.path.join(SOULS_DIR, role, "SOUL.md")
     with open(path) as f:
-        return f.read()
+        text = f.read()
+    # Append any SKILL_*.md playbooks the role ships with (capped per skill).
+    d = os.path.join(SOULS_DIR, role)
+    for fn in sorted(os.listdir(d)):
+        if fn.startswith("SKILL_") and fn.endswith(".md"):
+            with open(os.path.join(d, fn)) as f:
+                text += f"\n\n--- {fn} ---\n" + f.read()[:3000]
+    return text
 
 
 # ---------- corpus git ----------
@@ -693,7 +700,8 @@ def cmd_intake(args):
     for it in kata_list(limit=500):
         sid = it["short_id"]
         t = it["title"]
-        if sid in labeled or t.startswith("[stop]") or "[EPIC]" in t or "smoke test" in t:
+        if (sid in labeled or t.startswith("[stop]") or t.startswith("[artifact]")
+                or "[EPIC]" in t or "smoke test" in t):
             continue
         cands.append(it)
     if args.katas:
@@ -773,6 +781,8 @@ def cmd_evidence(_args):
     rows = []
     if os.path.isdir(ARTIFACTS):
         for sid in sorted(os.listdir(ARTIFACTS)):
+            if not os.path.isdir(os.path.join(ARTIFACTS, sid)):
+                continue  # generated .html artifacts live alongside kata dirs
             timeline = read_timeline(sid)
             if not timeline:
                 continue
@@ -801,6 +811,51 @@ def cmd_evidence(_args):
         if not rows:
             f.write("| (no factory activity yet) |\n")
     print(f"wrote {path} ({len(rows)} katas)")
+    return 0
+
+
+# ---------- Tech Lead artifact creation (plan #20) ----------
+
+def cmd_artifact(args):
+    """Tech Lead builds a self-contained HTML visualization from factory state."""
+    tag = re.sub(r"[^a-zA-Z0-9_-]", "-", args.tag or "artifact")
+    gates = []
+    for lbl in ALL_GATE_LABELS:
+        items = kata_list(label=lbl)
+        if items:
+            gates.append(f"{lbl}: " + ", ".join(
+                f"{i['short_id']} ({i['title'][:60]})" for i in items[:10]))
+    board = kata("list").stdout[-3000:]
+    gitlog = corpus_git("log", "--oneline", "--all", "-15", check=False).stdout
+    diffstat = corpus_git("diff", "--stat", "main...HEAD", check=False).stdout[-1500:]
+    context = ("KATA BOARD SUMMARY:\n" + board +
+               "\n\nGATE STATE:\n" + ("\n".join(gates) or "(no katas at gates)") +
+               "\n\nCORPUS GIT LOG (all branches):\n" + gitlog +
+               "\n\nCURRENT BRANCH DIFF STAT:\n" + diffstat)
+    system = (soul("tech-lead") +
+              "\n\nYou are producing an HTML artifact. Reply with ONLY a complete HTML "
+              "document starting with <!doctype html>. Requirements: fully self-contained "
+              "(embedded CSS/JS, no external CDNs or network requests), dark theme, "
+              "renders correctly when opened directly in a browser. No markdown fences.")
+    user = f"REQUEST: {args.prompt}\n\nFACTORY STATE:\n{context[:20000]}"
+    est = (len(system) + len(user)) // 3 + 512
+    text = llm_chat(system, user, f"artifact-{tag}", "tech-lead",
+                    max_tokens=max(4096, min(16384, CTX_LIMIT - est)))
+    # Strip a fence if the model added one anyway, then isolate the document.
+    m = re.search(r"```(?:html)?\s*\n(.*?)\n```", text, re.DOTALL)
+    if m and "<html" in m.group(1).lower():
+        text = m.group(1)
+    idx = text.lower().find("<!doctype")
+    if idx < 0:
+        idx = text.lower().find("<html")
+    if idx > 0:
+        text = text[idx:]
+    os.makedirs(ARTIFACTS, exist_ok=True)
+    ts = now().strftime("%Y%m%d-%H%M%S")
+    path = os.path.join(ARTIFACTS, f"{tag}-{ts}.html")
+    with open(path, "w") as f:
+        f.write(text)
+    print(f"artifact written: {path}")
     return 0
 
 
@@ -863,10 +918,13 @@ def main():
     sub.add_parser("evidence")
     b = sub.add_parser("baseline")
     b.add_argument("--kata", required=True)
+    a = sub.add_parser("artifact")
+    a.add_argument("--prompt", required=True)
+    a.add_argument("--tag", default="artifact")
     args = ap.parse_args()
     fns = {"gate": cmd_gate, "intake": cmd_intake, "stop-check": cmd_stop_check,
            "heartbeat": cmd_heartbeat, "status": cmd_status,
-           "evidence": cmd_evidence, "baseline": cmd_baseline}
+           "evidence": cmd_evidence, "baseline": cmd_baseline, "artifact": cmd_artifact}
     sys.exit(fns[args.cmd](args))
 
 

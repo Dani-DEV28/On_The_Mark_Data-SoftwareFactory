@@ -3,19 +3,16 @@
 # Single entry point for the factory.
 #
 # Usage:
-#   ./scripts/sfai.sh -repo <github-url> run           # fetch issues -> create katas -> (P2: agents fix)
-#   ./scripts/sfai.sh status                           # board + serving plane + sandbox health
-#   ./scripts/sfai.sh create artifact -p "prompt" [-t tag]  # Tech Lead builds HTML visualization
+#   ./scripts/sfai.sh -repo <github-url> run          # fetch issues -> katas -> orchestrate
+#   ./scripts/sfai.sh status                          # board + serving plane + sandbox health
+#   ./scripts/sfai.sh create artifact -p "prompt" [-t tag]   # Tech Lead builds HTML visualization
 #   ./scripts/sfai.sh help
 
 set -euo pipefail
 
 FACTORY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SWAP_URL="${SFAI_INFERENCE_URL:-http://localhost:9292}"
-MODEL="${SFAI_MODEL:-qwen3.6-35b-a3b-fp8}"
 REPO_URL=""
-ARTIFACT_TAG=""
-ARTIFACT_PROMPT=""
 
 usage() {
     sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
@@ -23,16 +20,15 @@ usage() {
 }
 
 # --- arg parsing ---
-CMD=""
-SUB_CMD=""
+CMD="" ART_PROMPT="" ART_TAG="artifact"
 while [ $# -gt 0 ]; do
     case "$1" in
         -repo|--repo) REPO_URL="$2"; shift 2 ;;
-        -p) ARTIFACT_PROMPT="$2"; shift 2 ;;
-        -t) ARTIFACT_TAG="$2"; shift 2 ;;
-        create) CMD="create"; shift ;;
-        artifact) SUB_CMD="artifact"; shift ;;
         run|status|help) CMD="$1"; shift ;;
+        create) [ "${2:-}" = "artifact" ] || { echo "Usage: sfai create artifact -p \"prompt\" [-t tag]" >&2; exit 1; }
+                CMD="artifact"; shift 2 ;;
+        -p|--prompt) ART_PROMPT="$2"; shift 2 ;;
+        -t|--tag) ART_TAG="$2"; shift 2 ;;
         -h|--help) usage ;;
         *) echo "Unknown argument: $1" >&2; usage 1 ;;
     esac
@@ -42,108 +38,6 @@ done
 # --- helpers ---
 repo_slug() {  # https://github.com/owner/name(.git) -> owner/name
     echo "$1" | sed -E 's#^https?://github.com/##; s#\.git$##; s#/$##'
-}
-
-cmd_create_artifact() {
-    [ -n "$ARTIFACT_PROMPT" ] || { echo "ERROR: create artifact requires -p \"prompt\"" >&2; exit 1; }
-
-    local tag="${ARTIFACT_TAG:-artifact}"
-    local timestamp; timestamp="$(date +%Y%m%d-%H%M%S)"
-    local out_dir="$FACTORY_DIR/evidence/artifacts"
-    local out_file="$out_dir/${tag}-${timestamp}.html"
-    mkdir -p "$out_dir"
-
-    echo "=== sfai create artifact ==="
-    echo "Tag:    $tag"
-    echo "Prompt: $ARTIFACT_PROMPT"
-    echo "Output: $out_file"
-    echo ""
-
-    # Gather context for the Tech Lead
-    echo "--- Gathering context ---"
-    local ctx_board ctx_git ctx_corpus
-    ctx_board="$(cd "$FACTORY_DIR" && kata list --agent 2>/dev/null || echo "kata board not available")"
-    ctx_git="$(cd "$FACTORY_DIR/corpus" && git log --oneline -20 2>/dev/null || echo "corpus git not available")"
-    ctx_corpus="$(cd "$FACTORY_DIR/corpus" && git diff --stat HEAD~5..HEAD 2>/dev/null || echo "insufficient git history")"
-
-    # Build system prompt for the Tech Lead
-    local system_prompt
-    system_prompt="$(cat << PROMPT
-You are the Tech Lead of an AI software development factory.
-You produce visual HTML documents that demonstrate progress and changes in the repository.
-
-Current kata board state:
-\`\`\`
-$ctx_board
-\`\`\`
-
-Recent corpus (target repo) changes:
-\`\`\`
-$ctx_git
-$ctx_corpus
-\`\`\`
-
-The human has asked you to create a visualization about:
-$ARTIFACT_PROMPT
-
-Generate a self-contained HTML document (single file, no external dependencies) that:
-- Is visually clear and professional (dark theme preferred)
-- Uses embedded CSS and JavaScript (no external CDN links)
-- Includes any data tables, charts, or logs relevant to the prompt
-- Shows timestamps and context for all data
-- Can be opened directly in a browser offline
-- Do NOT wrap the HTML in markdown code fences — output ONLY the raw HTML
-
-Output ONLY the raw HTML, nothing else.
-PROMPT
-)"
-
-    # Call the model (same inference endpoint used by the agents)
-    echo "--- Tech Lead generating artifact ---"
-    local html_result
-    html_result="$(curl -s "$SWAP_URL/v1/chat/completions" \
-        -H "Content-Type: application/json" \
-        -d "$(cat << EOF
-{
-  "model": "$MODEL",
-  "messages": [
-    {"role": "system", "content": $(echo "$system_prompt" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))")},
-    {"role": "user", "content": "Generate the HTML visualization based on the current context and my request: $ARTIFACT_PROMPT"}
-  ],
-  "temperature": 0.3,
-  "max_tokens": 8192
-}
-EOF
-    )" \
-    | python3 -c '
-import json, sys
-try:
-    resp = json.load(sys.stdin)
-    html = resp["choices"][0]["message"]["content"]
-    # Strip markdown code fences if present
-    html = html.strip()
-    if html.startswith("```html"):
-        html = html[7:]
-    if html.startswith("```"):
-        html = html[3:]
-    if html.endswith("```"):
-        html = html[:-3]
-    print(html.strip())
-except (KeyError, json.JSONDecodeError) as e:
-    print("ERROR: failed to parse model response", file=sys.stderr)
-    sys.exit(1)
-')" || {
-        echo "ERROR: model call failed" >&2
-        exit 1
-    }
-
-    echo "$html_result" > "$out_file"
-    local size; size="$(wc -c < "$out_file")"
-    echo ""
-    echo "=== Artifact written ==="
-    echo "File:  $out_file"
-    echo "Size:  ${size} bytes"
-    echo "Open:  file://$out_file"
 }
 
 cmd_status() {
@@ -231,14 +125,15 @@ print(f"Created {created} katas ({skipped} already on board)")'
     fi
 }
 
+cmd_artifact() {
+    [ -n "$ART_PROMPT" ] || { echo "ERROR: create artifact requires -p \"prompt\"" >&2; exit 1; }
+    FACTORY_DIR="$FACTORY_DIR" exec python3 "$FACTORY_DIR/scripts/factory/factory.py" \
+        artifact --prompt "$ART_PROMPT" --tag "$ART_TAG"
+}
+
 case "$CMD" in
     run) cmd_run ;;
     status) cmd_status ;;
-    create)
-        case "$SUB_CMD" in
-            artifact) cmd_create_artifact ;;
-            *) echo "Unknown create subcommand: artifact, report, kata" >&2; exit 1 ;;
-        esac
-        ;;
+    artifact) cmd_artifact ;;
     help) usage ;;
 esac

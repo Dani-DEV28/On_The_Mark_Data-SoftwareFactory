@@ -1,6 +1,10 @@
 # Dani-PLAN.md — Software Factory MVP Build Plan
 
-> **STATUS 2026-07-26:** P0 and P1 are DONE (commit 7c9ac2e). Rule change: only
+> **STATUS 2026-07-26 (evening):** P0–P4 ALL DONE — pipeline verified end-to-end.
+> Walking skeleton: kata `asjx` (petri #117) went intake→review PR-ready in 5m20s,
+> branch `factory/asjx` passes 526/526 tests. Stop-gap drill verified (per-kata HALT
+> rc=2 + incident report; manual [stop] rc=3). `sfai create artifact` live.
+> Original status: P0 and P1 DONE (commit 7c9ac2e). Rule change: only
 > the LLM must be local — internet calls are allowed, so all air-gap/USB staging
 > items are dropped. agentgateway is dropped too (llama-swap routes by model
 > name; OpenShell gateway handles sandbox policy). Next: P2 orchestration.
@@ -262,7 +266,7 @@ openclaw agent start --name <role> --soul <path> --model auto
 
 ## P2 — MVP Pipeline: Issue Review → Fix
 
-### [ ] 16. Issue intake via GitHub API on petri repo
+### [x] 16. Issue intake via GitHub API — DONE (sfai run imports issues with full bodies + idempotency keys; Tech Lead analysis happens at the intake gate)
 **Issues come from the petri repo's GitHub Issues API.** The `sfai` CLI fetches them and creates katas.
 
 `sfai run` flow:
@@ -292,7 +296,7 @@ kata close <id> --done --message "Fixed" --commit <sha>  # close with evidence
 | `[stop]` | Manual stop-gap | TPM halts pipeline |
 | `[artifact]` | Visualization | Tech Lead produces HTML artifact |
 
-### [ ] 17. Implement stop conditions & Factory Incident Report
+### [x] 17. Stop conditions & Factory Incident Report — DONE & DRILL-TESTED (config/stop-gap.yaml per spec; stop-gap.sh: 0=PASS, 2=per-kata HALT+quarantine+report, 3=manual [stop] full stop; incident report verified against spec fields)
 **The TPM enforces stop conditions** — not the Tech Lead. The TPM continuously monitors execution and halts when predefined operational limits are reached.
 
 **Stop conditions config**: `config/stop-gap.yaml`
@@ -370,7 +374,7 @@ Recommendation:
 
 This report provides the Human Lead with a complete audit trail of what the swarm attempted before halting.
 
-### [ ] 18. Build agent orchestration
+### [x] 18. Agent orchestration — DONE (scripts/orchestrate.sh + advance-gate.sh + scripts/factory/factory.py: TPM pull model over kata labels gate:*, YAML artifacts in evidence/artifacts/<kata>/ mirrored as kata comments, Architect gated on needs-architect, QA runs targeted + FULL suite and never fixes code)
 **Replace `run-kata.sh`** with a TPM-driven pull model. Agents exchange structured YAML task artifacts.
 
 **Workflow order** (each step advances kata status on the board):
@@ -436,7 +440,7 @@ while true; do
 done
 ```
 
-### [ ] 19. Wire end-to-end pipeline
+### [x] 19. End-to-end pipeline — DONE (sfai run → intake → orchestrate; verified on kata asjx: 7 gates, PR-ready branch factory/asjx, 526/526 tests)
 ```bash
 # Single command does it all:
 ./sfai.sh -repo "https://github.com/onthemarkdata/petri" run
@@ -451,7 +455,7 @@ What `sfai run` does:
 7. On halt: TPM generates Factory Incident Report
 8. Prints summary when all katas are done or stopped
 
-### [ ] 20. Tech Lead artifact creation (`sfai create artifact`)
+### [x] 20. Tech Lead artifact creation — DONE (sfai create artifact -p "..." -t tag → self-contained dark-theme HTML in evidence/artifacts/<tag>-<ts>.html; [artifact] katas excluded from code intake; SKILL_*.md files now feed agent prompts)
 **The Tech Lead produces visual HTML documents** on demand via:
 
 ```bash
@@ -466,7 +470,7 @@ Flow:
 
 Tech Lead SOUL.md updated to include artifact creation as a core responsibility.
 
-### [ ] 21. Add TPM checkpoints
+### [x] 21. TPM checkpoints — DONE (stop-gap check runs after every gate in the orchestrate loop; gate transitions only happen on validated artifacts)
 Checkpoint at each stage transition — TPM evaluates before allowing advance:
 - `intaken → scoped`: Tech Lead analysis complete, task artifact valid?
 - `scoped → designed`: PM acceptance criteria defined?
@@ -500,20 +504,20 @@ Checkpoint at each stage transition — TPM evaluates before allowing advance:
 
 ## P4 — Evidence & Baseline
 
-### [ ] 22. Run walking skeleton
+### [x] 22. Walking skeleton — DONE (asjx: intake 22:41:30 → PR-ready 22:46:50; Architect correctly skipped; zero regressions)
 ```bash
 ./sfai.sh -repo "https://github.com/onthemarkdata/petri" run
 # Watch the pipeline: fetch issues → create katas → agents fix petri → close
 ```
 
-### [ ] 23. Collect evidence
+### [x] 23. Collect evidence — DONE (evidence.sh → evidence/evidence-table.md from kata timelines + evidence/usage.jsonl token/latency log; no agentgateway needed)
 ```bash
 ./scripts/evidence.sh
 ```
 - Currently writes a template to `evidence/evidence-table.md`
 - **Enhance**: pull real data from `kata list --agent --json` and agentgateway OTel
 
-### [ ] 24. Baseline comparison
+### [x] 24. Baseline comparison — DONE (baseline.sh --kata <id>: single generalist agent, no gates, branch baseline/<id>; results in evidence/baseline/)
 ```bash
 ./scripts/baseline.sh -repo "https://github.com/onthemarkdata/petri"
 ```

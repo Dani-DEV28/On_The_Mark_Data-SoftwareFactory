@@ -10,7 +10,7 @@ set -uo pipefail
 
 FACTORY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 export FACTORY_DIR
-PY="python3 $FACTORY_DIR/scripts/factory/factory.py"
+PY="python3 -u $FACTORY_DIR/scripts/factory/factory.py"
 
 LIMIT=2 KATAS="" ONCE=0 MAX_CYCLES=0
 while [ $# -gt 0 ]; do
@@ -23,14 +23,22 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-echo "=== Factory orchestrator (limit=$LIMIT katas=${KATAS:-auto}) ==="
+RUN_START=$(date +%s)
+echo "╔══════════════════════════════════════════════════════════════"
+echo "║ SOFTWARE FACTORY — orchestrator starting $(date '+%Y-%m-%d %H:%M:%S')"
+echo "║ katas: ${KATAS:-auto-intake}   parallel limit: $LIMIT   model: ${SFAI_MODEL:-qwen3.6-35b-a3b-fp8}"
+echo "║ gates: intake→scoped→designed→implement→qa→(tl-review)→docs→review"
+echo "║ persistent log: evidence/factory.log   TPM config: config/stop-gap.yaml"
+echo "╚══════════════════════════════════════════════════════════════"
 $PY intake ${KATAS:+--katas "$KATAS"} --limit "$LIMIT"
 
 cycle=0
 stopcheck_errs=0
 while true; do
     cycle=$((cycle + 1))
-    echo "--- cycle $cycle ---"
+    CYCLE_START=$(date +%s)
+    echo ""
+    echo "━━━ cycle $cycle — $(date '+%H:%M:%S') ━━━"
     for gate in intake scoped designed implement qa tl-review docs; do
         $PY gate --gate "$gate" --limit "$LIMIT" ${KATAS:+--katas "$KATAS"}
         # Exit codes: 0=PASS, 2=per-kata HALT (quarantined at gate:halted,
@@ -57,11 +65,18 @@ while true; do
     done
     $PY heartbeat
     $PY status
+    echo "━━━ cycle $cycle done in $(( $(date +%s) - CYCLE_START ))s (run total $(( $(date +%s) - RUN_START ))s) ━━━"
 
     # Done when nothing is active in the working gates
     active=$($PY status | grep -cE "gate:(intaken|scoped|designed|implementing|qa|tl-review|documenting) " || true)
     if [ "$active" -eq 0 ]; then
-        echo "=== All katas at gate:review, gate:halted, or done ==="
+        echo ""
+        echo "╔══════════════════════════════════════════════════════════════"
+        echo "║ ALL KATAS at gate:review, gate:halted, or done — $(( $(date +%s) - RUN_START ))s total"
+        echo "║ review the work:   kata list --label gate:review"
+        echo "║ inspect a fix:     cd corpus && git diff main...factory/<kata>"
+        echo "║ incidents (if any): ls evidence/incidents/"
+        echo "╚══════════════════════════════════════════════════════════════"
         break
     fi
     [ "$ONCE" -eq 1 ] && break

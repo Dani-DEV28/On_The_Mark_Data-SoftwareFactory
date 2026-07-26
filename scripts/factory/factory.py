@@ -35,6 +35,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 
@@ -75,8 +76,93 @@ def now():
     return dt.datetime.now(dt.timezone.utc)
 
 
+LOG_FILE = os.environ.get("SFAI_LOG_FILE") or os.path.join(EVIDENCE, "factory.log")
+
+
+def file_log(line):
+    try:
+        os.makedirs(EVIDENCE, exist_ok=True)
+        with open(LOG_FILE, "a") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
+
+
 def log(msg):
-    print(f"[{now().strftime('%H:%M:%S')}] {msg}", flush=True)
+    line = f"[{now().strftime('%H:%M:%S')}] {msg}"
+    print(line, flush=True)
+    file_log(line)
+
+
+IS_TTY = sys.stdout.isatty()
+
+ROLE_ICON = {
+    "tech-lead": "🧭", "product-manager": "📋", "architect": "📐",
+    "implementer": "🔧", "devops-qa": "🧪", "docs-engineer": "📚",
+    "tpm": "🕰️", "baseline": "👤",
+}
+
+
+class AgentView:
+    """Live spinner line for one agent turn: role, tokens, tok/s, elapsed,
+    and a rolling tail of what the agent is generating. Falls back to plain
+    log lines when stdout is not a TTY (nohup / logs)."""
+
+    FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def __init__(self, role, kata_id, verb="working"):
+        self.role, self.kata, self.verb = role, kata_id, verb
+        self.tok = 0
+        self.tail = ""
+        self.t0 = time.time()
+        self._stop = threading.Event()
+        self._i = 0
+        self._thread = None
+        self._lock = threading.Lock()
+
+    def start(self):
+        if IS_TTY:
+            self._thread = threading.Thread(target=self._spin, daemon=True)
+            self._thread.start()
+        else:
+            log(f"{ROLE_ICON.get(self.role, '•')} {self.role} {self.verb} on {self.kata}...")
+        return self
+
+    def feed(self, delta):
+        with self._lock:
+            self.tok += 1
+            self.tail = (self.tail + delta).replace("\n", "⏎ ")[-64:]
+
+    def note(self, text):
+        with self._lock:
+            self.tail = text[-64:]
+
+    def _spin(self):
+        while not self._stop.is_set():
+            f = self.FRAMES[self._i % len(self.FRAMES)]
+            self._i += 1
+            el = time.time() - self.t0
+            rate = self.tok / el if el > 0.5 else 0
+            with self._lock:
+                tail = self.tail
+            icon = ROLE_ICON.get(self.role, "•")
+            line = (f"\r\x1b[K{f} {icon} \x1b[1m{self.role:<16}\x1b[0m {self.kata}"
+                    f"  {self.tok:>5} tok  {rate:5.1f} tok/s  {el:5.0f}s  \x1b[2m{tail}\x1b[0m")
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            time.sleep(0.12)
+
+    def done(self, msg=""):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=0.5)
+        el = time.time() - self.t0
+        icon = ROLE_ICON.get(self.role, "•")
+        if IS_TTY:
+            sys.stdout.write("\r\x1b[K")
+        line = f"✓ {icon} {self.role:<16} {self.kata}  {self.tok} tok  {el:.0f}s  {msg}"
+        print(line, flush=True)
+        file_log(f"[{now().strftime('%H:%M:%S')}] {line}")
 
 
 # ---------- kata CLI ----------
@@ -144,6 +230,7 @@ def save_artifact(short_id, name, data, actor):
     with open(path, "w") as f:
         f.write(text)
     comment(short_id, f"[{actor}] {name} artifact:\n```yaml\n{text[:3500]}\n```", actor)
+    log(f"   {short_id}: {name} artifact saved ({len(text)} bytes) → {os.path.relpath(path, FACTORY_DIR)}")
     return path
 
 
@@ -171,20 +258,40 @@ def read_timeline(short_id):
 
 # ---------- LLM ----------
 
-def llm_chat(system, user, kata_id, role, max_tokens=8192, temperature=0.2):
+def llm_chat(system, user, kata_id, role, max_tokens=8192, temperature=0.2, view=None):
     payload = json.dumps({
         "model": MODEL,
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": user}],
         "max_tokens": max_tokens,
         "temperature": temperature,
+        "stream": True,
+        "stream_options": {"include_usage": True},
     }).encode()
     req = urllib.request.Request(LLM_URL, data=payload,
                                  headers={"Content-Type": "application/json"})
     t0 = time.time()
+    parts, usage = [], {}
     with urllib.request.urlopen(req, timeout=1200) as r:
-        resp = json.load(r)
-    usage = resp.get("usage", {})
+        for raw in r:
+            line = raw.decode("utf-8", "replace").strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            if chunk.get("usage"):
+                usage = chunk["usage"]
+            for ch in chunk.get("choices", []):
+                delta = (ch.get("delta") or {}).get("content")
+                if delta:
+                    parts.append(delta)
+                    if view:
+                        view.feed(delta)
     os.makedirs(EVIDENCE, exist_ok=True)
     with open(USAGE_LOG, "a") as f:
         f.write(json.dumps({
@@ -193,7 +300,7 @@ def llm_chat(system, user, kata_id, role, max_tokens=8192, temperature=0.2):
             "completion_tokens": usage.get("completion_tokens"),
             "seconds": round(time.time() - t0, 1),
         }) + "\n")
-    return resp["choices"][0]["message"]["content"] or ""
+    return "".join(parts)
 
 
 def extract_yaml(text):
@@ -211,20 +318,25 @@ def agent_yaml(role, system, user, kata_id, schema_keys, max_tokens=8192):
         prompt = user if attempt == 0 else (
             user + f"\n\nYOUR PREVIOUS REPLY WAS INVALID ({last_err}). "
                    "Reply again with ONLY one fenced ```yaml block containing the artifact.")
+        view = AgentView(role, kata_id,
+                         "retrying" if attempt else "working").start()
         try:
             # Fit completion into the served context (conservative ~3 chars/token).
             est = (len(system) + len(prompt)) // 3 + 512
             text = llm_chat(system, prompt, kata_id, role,
-                            max_tokens=max(2048, min(max_tokens, CTX_LIMIT - est)))
+                            max_tokens=max(2048, min(max_tokens, CTX_LIMIT - est)),
+                            view=view)
             data = extract_yaml(text)
             if not isinstance(data, dict):
                 raise ValueError("artifact is not a YAML mapping")
             missing = [k for k in schema_keys if k not in data]
             if missing:
                 raise ValueError(f"missing keys: {missing}")
+            view.done("artifact ✓")
             return data
         except Exception as e:  # noqa: BLE001
             last_err = str(e)[:200]
+            view.done(f"✗ {last_err[:60]}")
     raise RuntimeError(f"{role} produced invalid artifact: {last_err}")
 
 
@@ -464,7 +576,9 @@ def gate_qa(item):
         runs.append("uv run pytest tests/ -q")
     t0 = time.time()
     out, passed = "", True
+    qa_view = AgentView("devops-qa", sid, "testing").start()
     for c in runs:
+        qa_view.note(f"$ {c}")
         cmd_args = [UV_BIN, "run", "--extra", "test"] + c.split()[2:]
         try:
             r = subprocess.run(cmd_args, cwd=CORPUS, capture_output=True, text=True, timeout=900)
@@ -476,6 +590,7 @@ def gate_qa(item):
             out, passed = out + f"\n$ {c}\nTIMEOUT after 900s", False
             break
     out = out[-6000:]
+    qa_view.done("tests green ✓" if passed else "tests FAILED ✗")
     cmd = " && ".join(runs)
     failures = re.findall(r"^(FAILED|ERROR) (\S+)", out, re.MULTILINE)
     sig = hashlib.sha256("|".join(sorted(f"{a} {b}" for a, b in failures)).encode()).hexdigest()[:12]
@@ -741,14 +856,17 @@ def cmd_gate(args):
     items = items[:args.limit]
     if not items:
         return 0
-    log(f"gate {args.gate} ({role}): {len(items)} kata(s)")
+    log(f"┌─ gate {args.gate} ({ROLE_ICON.get(role, '')} {role}): {len(items)} kata(s): "
+        + ", ".join(f"{i['short_id']} «{i['title'][:45]}»" for i in items))
     for it in items:
+        t0 = time.time()
         try:
             HANDLERS[args.gate](it)
+            log(f"└─ {it['short_id']}: gate {args.gate} finished in {time.time() - t0:.0f}s")
         except Exception as e:  # noqa: BLE001
             record_event(it["short_id"], f"{role} Failed", str(e)[:300])
             comment(it["short_id"], f"[{role}] gate {args.gate} ERROR: {str(e)[:400]}", role)
-            log(f"  {it['short_id']}: ERROR in {args.gate}: {str(e)[:200]}")
+            log(f"└─ {it['short_id']}: ERROR in {args.gate} after {time.time() - t0:.0f}s: {str(e)[:200]}")
     return 0
 
 
@@ -839,8 +957,10 @@ def cmd_artifact(args):
               "renders correctly when opened directly in a browser. No markdown fences.")
     user = f"REQUEST: {args.prompt}\n\nFACTORY STATE:\n{context[:20000]}"
     est = (len(system) + len(user)) // 3 + 512
+    view = AgentView("tech-lead", tag, "building artifact").start()
     text = llm_chat(system, user, f"artifact-{tag}", "tech-lead",
-                    max_tokens=max(4096, min(16384, CTX_LIMIT - est)))
+                    max_tokens=max(4096, min(16384, CTX_LIMIT - est)), view=view)
+    view.done("html ✓")
     # Strip a fence if the model added one anyway, then isolate the document.
     m = re.search(r"```(?:html)?\s*\n(.*?)\n```", text, re.DOTALL)
     if m and "<html" in m.group(1).lower():

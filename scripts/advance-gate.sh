@@ -4,4 +4,4 @@
 set -euo pipefail
 FACTORY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 export FACTORY_DIR
-exec python3 "$FACTORY_DIR/scripts/factory/factory.py" gate "$@"
+exec python3 -u "$FACTORY_DIR/scripts/factory/factory.py" gate "$@"

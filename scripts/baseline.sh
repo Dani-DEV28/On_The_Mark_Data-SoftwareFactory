@@ -14,4 +14,4 @@ while [ $# -gt 0 ]; do
     esac
 done
 [ -n "$KATA" ] || { echo "Usage: $0 --kata <id>"; exit 1; }
-exec python3 "$FACTORY_DIR/scripts/factory/factory.py" baseline --kata "$KATA"
+exec python3 -u "$FACTORY_DIR/scripts/factory/factory.py" baseline --kata "$KATA"

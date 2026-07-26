@@ -127,7 +127,7 @@ print(f"Created {created} katas ({skipped} already on board)")'
 
 cmd_artifact() {
     [ -n "$ART_PROMPT" ] || { echo "ERROR: create artifact requires -p \"prompt\"" >&2; exit 1; }
-    FACTORY_DIR="$FACTORY_DIR" exec python3 "$FACTORY_DIR/scripts/factory/factory.py" \
+    FACTORY_DIR="$FACTORY_DIR" exec python3 -u "$FACTORY_DIR/scripts/factory/factory.py" \
         artifact --prompt "$ART_PROMPT" --tag "$ART_TAG"
 }
 

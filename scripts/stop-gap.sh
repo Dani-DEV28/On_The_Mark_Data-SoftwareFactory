@@ -9,4 +9,4 @@ FACTORY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 export FACTORY_DIR
 [ "${1:-}" = "check" ] || { echo "Usage: $0 check [--kata <id>]"; exit 1; }
 shift
-exec python3 "$FACTORY_DIR/scripts/factory/factory.py" stop-check "$@"
+exec python3 -u "$FACTORY_DIR/scripts/factory/factory.py" stop-check "$@"

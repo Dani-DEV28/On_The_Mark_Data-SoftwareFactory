@@ -5,11 +5,143 @@
 > items are dropped. agentgateway is dropped too (llama-swap routes by model
 > name; OpenShell gateway handles sandbox policy). Next: P2 orchestration.
 
+---
+
+## Design Philosophy
+
+The factory follows three principles:
+
+- **Specialized Agents** — Every agent owns one responsibility.
+- **Structured Orchestration** — Agents exchange machine-readable YAML task artifacts instead of free-form conversations.
+- **Human-in-the-Loop** — The Human Lead remains the final authority for architecture, scope changes, and merge approval.
+
+The factory separates **technical decision-making** from **operational execution**:
+- The **Tech Lead** determines *how* software should be built.
+- The **TPM** determines *whether* execution is progressing effectively.
+- Specialized agents perform focused engineering tasks.
+- The **Human Lead** retains final authority over significant technical and product decisions.
+
+## System Architecture
+
+```text
+                    Human Lead
+                         │
+          Technical Direction & Approval
+                         │
+                  Tech Lead Agent
+        (Technical Planning & Delegation)
+                         │
+        ┌────────────────┴────────────────┐
+        │                                 │
+ Product Manager                     Technical PM
+ Requirements                    Workflow Orchestration
+        │                                 │
+        └──────────────┬──────────────────┘
+                       │
+                 Architect (optional)
+              (API changes, DB migrations,
+               cross-module refactors only)
+                       │
+                 Implementation
+                       │
+                  DevOps / QA
+                       │
+                 Documentation
+                       │
+                 Pull Request Ready
+                       │
+                    Human Review
+```
+
+## Workflow
+
+```
+GitHub Issue
+      │
+      ▼
+Tech Lead Analysis ───→ TPM creates kata on board
+      │
+      ▼
+Product Manager (acceptance criteria, edge cases, task breakdown)
+      │
+      ▼
+Architecture Review (optional — only for API/DB/cross-module changes)
+      │
+      ▼
+Implementation (Implementer)
+      │
+      ▼
+QA Validation (DevOps/QA — never fixes code, only validates)
+      │
+      ├───────────────┐
+      │               │
+      ▼               │
+Documentation         │
+      │               │
+      ▼               │
+PR Ready              │
+                      │
+              QA Failure ──→ Tech Lead Review ──→ New Implementation
+```
+
+## Agent Responsibilities
+
+| Role | Answers | Key Responsibility |
+|------|---------|-------------------|
+| Tech Lead | "How should we build this?" | Analyze issues, delegate, review, decide pivots |
+| Product Manager | "What exactly needs to be delivered?" | Requirements, AC, edge cases, task breakdown |
+| Architect | "Is this the correct design?" | Optional — API changes, DB migrations, refactors |
+| DevOps/QA | "Does the implementation pass?" | Tests, lint, formatting, build — never fixes code |
+| TPM | "Is the factory making forward progress?" | Board, heartbeat, retries, deadlock detection, stop conditions |
+| Implementer | "Can I implement this?" | Code, tests, refactor — never plans architecture |
+| Docs Engineer | "Is the change documented?" | README, CHANGELOG, API docs — only after QA passes |
+
+## Agent Communication
+
+Agents exchange **structured YAML task artifacts** instead of conversational context:
+
+```yaml
+# Example task passed between agents
+task:
+  title: Implement OAuth refresh token support
+
+acceptance_criteria:
+  - Existing login flow remains functional
+  - Refresh token expires correctly
+  - Unit tests pass
+
+affected_files:
+  auth/
+  tests/auth/
+
+constraints:
+  No breaking API changes
+```
+
+```yaml
+# Example completion artifact
+status: Complete
+
+summary:
+  Refresh token support implemented.
+
+artifacts:
+  Patch
+  Tests
+  Notes
+
+next_agent: QA
+```
+
+This approach reduces prompt drift and improves reproducibility across model swaps.
+
+---
+
 Target: **NVIDIA GB10 (DGX Spark)** — Linux/aarch64  
 Stack fallback: NemoClaw → OpenShell → OpenClaw  
 Corpus: `onthemarkdata/petri`  
 CLI: `sfai -repo <url> run` — single entry point for the factory  
-Pipeline: `sfai run` → fetch issues → create katas → agents fix → close (with stop-gap)
+Pipeline: `sfai run` → fetch issues → Tech Lead analyzes → TPM creates katas → agents fix → close (with stop-gap)
 
 ---
 
@@ -148,59 +280,155 @@ kata close <id> --done --message "Fixed" --commit <sha>  # close with evidence
 ```
 
 **Issue types** encoded in kata description prefix:
-| Prefix | Type | Agent routing |
-|--------|------|---------------|
-| `[bug]` | Bug fix | Implementer → DevOps+QA |
-| `[feature]` | New feature | PM → Architect → Implementer → DevOps+QA → Docs |
-| `[issue]` | Problem found | TPM triages → routes to appropriate agent |
-| `[spike]` | Investigation | Architect |
+| Prefix | Type | Pipeline |
+|--------|------|----------|
+| `[bug]` | Bug fix | Tech Lead → Implementer → QA → Docs → PR |
+| `[feature]` | New feature | Tech Lead → PM → Architect (optional) → Implementer → QA → Docs → PR |
+| `[issue]` | Problem found | Tech Lead → TPM triages → routes to appropriate agent |
+| `[spike]` | Investigation | Tech Lead → Architect |
 | `[docs]` | Documentation | Docs Engineer |
-| `[stop]` | Manual stop-gap | Halts pipeline |
+| `[stop]` | Manual stop-gap | TPM halts pipeline |
 
-### [ ] 17. Implement stop-gap mechanism
+### [ ] 17. Implement stop conditions & Factory Incident Report
+**The TPM enforces stop conditions** — not the Tech Lead. The TPM continuously monitors execution and halts when predefined operational limits are reached.
+
+**Stop conditions config**: `config/stop-gap.yaml`
+```yaml
+stop_conditions:
+  max_attempts: 5            # total retries on a kata
+  max_runtime: 45m           # wall-clock limit per kata
+  no_progress_cycles: 4      # heartbeat ticks with no status change
+  identical_failures: 3      # same QA failure repeated
+  max_failed_agents: 2       # distinct agents that have failed
+```
+
 **Central stop-gap module**: `scripts/stop-gap.sh`
 
-Checked at each pipeline gate. Halts pipeline if:
-- **Test failures**: >N consecutive failures (configurable, default 3)
-- **Rework loops**: >N rework cycles on same kata (default 3)
-- **Critical error**: agent returns unparseable output, tool call fails
-- **Manual override**: human creates a `[stop]` kata on the board → all agents see it and halt
-
 ```bash
-./scripts/stop-gap.sh check --gate <gate-name> --kata <id>
-# Returns: PASS | FAIL | HALT
+./scripts/stop-gap.sh check --kata <id>
+# Returns: PASS | FAIL | HALT (with reason)
 ```
 
-**Stop-gap config**: `config/stop-gap.yaml`
+When execution stops, the TPM generates a **Factory Incident Report**:
+
 ```yaml
-max_test_failures: 3
-max_rework_loops: 3
-halt_on_critical_error: true
-manual_override: false
+Factory Incident Report
+
+Issue:
+  #<kata-id>
+
+Status:
+  Stopped
+
+Reason:
+  Retry budget exceeded
+
+Attempts:
+  5
+
+Elapsed:
+  38 minutes
+
+Agents:
+  Tech Lead
+  Product Manager
+  Architect
+  Implementer
+  QA
+
+Timeline:
+  Analysis Complete
+  Planning Complete
+  Architecture Complete
+  Implementation Attempt 1
+  QA Failed
+  Retry
+  QA Failed
+  Retry
+  QA Failed
+
+Observed Errors:
+  Circular dependency
+  Migration timeout
+  Authentication regression
+
+Repeated Failure:
+  tests/auth/test_refresh.py
+
+Artifacts:
+  QA logs
+  Patch diff
+  Test results
+  Architecture notes
+
+Recommendation:
+  Human intervention required.
 ```
+
+This report provides the Human Lead with a complete audit trail of what the swarm attempted before halting.
 
 ### [ ] 18. Build agent orchestration
-**Replace `run-kata.sh`** (currently serial bash with no real agent coordination).
+**Replace `run-kata.sh`** with a TPM-driven pull model. Agents exchange structured YAML task artifacts.
+
+**Workflow order** (each step advances kata status on the board):
+
+```
+GitHub Issue
+      │
+      ▼
+Tech Lead (analyzes → produces task artifact → delegates)
+      │
+      ▼
+TPM (creates kata on board from Tech Lead's analysis)
+      │
+      ▼
+PM (acceptance criteria, edge cases, sub-tasks)
+      │
+      ▼
+Architect (optional — only if scope triggers it)
+      │
+      ▼
+Implementer (code + tests, guided by task artifact)
+      │
+      ▼
+DevOps/QA (tests, lint, build — never fixes code)
+      │
+      ├───────────────┐
+      │               │
+      ▼               │
+Documentation         │
+      │               │
+      ▼               │
+PR Ready              │
+                      │
+              QA Failure ──→ Tech Lead Review ──→ New task artifact ──→ Implementer retry
+```
 
 **Pull model** — the kata board is the organizing backbone. All agents use `kata` CLI to find, claim, and advance work:
 
-1. **TPM heartbeat** runs every 5min: `kata list --agent --json` → inspects all statuses, checks for stalled items
-2. **Each agent polls** for katas at its gate using `kata list` + `kata show`:
-   - PM polls `briefed` → creates sub-katas with `kata create`, advances to `scoped`
-   - Architect polls `scoped` → writes design notes, advances to `designed`
-   - Implementer polls `designed` → writes code + tests with `kata claim`, advances to `in-progress`
-   - DevOps+QA polls `in-progress` → runs tests with `sandbox exec`, advances to `in-review` or files `[issue]` kata
-   - Docs polls `in-review` → writes docs with `kata claim`, advances to `done`
-3. **Stop-gap check** at each transition — polls for `[stop]` katas on the board
+1. **TPM heartbeat** runs every 5min: `kata list --agent --json` → inspects all statuses, checks for stalled items, enforces stop conditions, runs deadlock detection
+2. **Tech Lead** polls `intaken` → analyzes issue, produces YAML task artifact, delegates to TPM
+3. **TPM** creates katas from Tech Lead's delegation, sets status to `scoped`
+4. **PM** polls `scoped` → writes AC and sub-tasks, advances to `designed`
+5. **Architect** polls `designed` (only if scope label present) → design notes or skip, advances to `implementing`
+6. **Implementer** polls `implementing` → reads task artifact, writes code + tests with `kata claim`, advances to `qa`
+7. **DevOps/QA** polls `qa` → runs tests with `sandbox exec`, advances to `documenting` or files `[issue]` kata back to Tech Lead
+8. **Docs** polls `documenting` → writes docs with `kata claim`, advances to `review`
+9. **Human** reviews PR, closes kata
+
+**Stop-gap check** at every transition — TPM monitors all conditions.
 
 **Orchestrator script**: `scripts/orchestrate.sh`
 ```bash
 # Main loop
 while true; do
-  for gate in briefed scoped designed in-progress in-review; do
-    ./scripts/advance-gate.sh --gate "$gate"
-    ./scripts/stop-gap.sh check --gate "$gate"
-  done
+  ./scripts/advance-gate.sh --gate intake    # Tech Lead
+  ./scripts/advance-gate.sh --gate scoped    # PM
+  ./scripts/advance-gate.sh --gate designed  # Architect (optional)
+  ./scripts/advance-gate.sh --gate implement # Implementer
+  ./scripts/advance-gate.sh --gate qa        # DevOps/QA
+  ./scripts/advance-gate.sh --gate docs      # Docs
+  ./scripts/stop-gap.sh check                # TPM checks all conditions
   sleep 60
 done
 ```
@@ -213,18 +441,23 @@ done
 What `sfai run` does:
 1. Clones petri to `corpus/` if not present
 2. Fetches open issues from GitHub Issues API
-3. Creates katas: `kata create "[bug] <title>"`
-4. Starts agent orchestration loop (agents claim, fix, test, close)
-5. Runs stop-gap checks at each transition
-6. Prints summary when all katas are done
+3. Tech Lead analyzes each issue → produces YAML task artifact
+4. TPM creates katas on the board from Tech Lead's delegation
+5. Agents flow through: PM → Architect(opt) → Implementer → QA → Docs
+6. TPM monitors heartbeat, enforces stop conditions at every gate
+7. On halt: TPM generates Factory Incident Report
+8. Prints summary when all katas are done or stopped
 
-### [ ] 20. Add stop-gap checkpoints
-Checkpoint at each stage transition:
-- `briefed → scoped`: intake parsed correctly?
-- `scoped → designed`: design is feasible?
-- `designed → in-progress`: tests compile?
-- `in-progress → in-review`: tests pass?
-- `in-review → done`: docs complete?
+### [ ] 20. Add TPM checkpoints
+Checkpoint at each stage transition — TPM evaluates before allowing advance:
+- `intaken → scoped`: Tech Lead analysis complete, task artifact valid?
+- `scoped → designed`: PM acceptance criteria defined?
+- `designed → implementing`: Architect sign-off (or skip)?
+- `implementing → qa`: Code compiles, tests written?
+- `qa → documenting`: All tests pass?
+- `qa → failed`: QA failure — Tech Lead reviews, produces new task artifact
+- `documenting → review`: Docs written?
+- `review → done`: Human approved PR merge?
 
 ---
 
@@ -232,15 +465,17 @@ Checkpoint at each stage transition:
 
 | # | Issue | Location | Fix |
 |---|-------|----------|-----|
-| 1 | `config/agentgateway.yaml` missing | `serve.sh:38` | Create config with localhost endpoint, per-role models, OTel off |
-| 2 | No offline install path in setup.sh | `setup.sh:23` | Add `--offline` flag, use `stage/binaries/` |
-| 3 | `run-kata.sh` is serial bash, not agent-driven | `scripts/run-kata.sh` | Replace with `orchestrate.sh` + `advance-gate.sh` |
-| 4 | No issue intake via kata CLI | missing | Use `kata create` directly — agents file issues as katas |
-| 5 | No stop-gap mechanism | missing | New `scripts/stop-gap.sh` + `config/stop-gap.yaml` |
-| 6 | `ISSUES.md` is template only | `ISSUES.md` | Populate with 5-10 real issues from onthemarkdata/petri |
-| 7 | `scripts/stage-usb.sh` missing | referenced in PREP.md | Create for USB staging |
-| 8 | Agent CLI syntax unverified | `agents.sh` | Test against actual `openclaw --help` output |
-| 9 | No venv for python deps | `setup.sh` | Create `.venv` for kata, agentgateway, etc. |
+| # | Issue | Location | Fix |
+|---|-------|----------|-----|
+| 1 | Workflow skips Tech Lead analysis | `sfai.sh`, `orchestrate.sh` | Tech Lead must analyze each issue first, produce YAML task artifact, then TPM creates katas |
+| 2 | Architect always-on but should be optional | `orchestrate.sh` | Gate Architect behind scope check (API/DB/cross-module) |
+| 3 | Agent communication is unstructured | `orchestrate.sh` | Agents exchange structured YAML task artifacts, not free-form text |
+| 4 | TPM lacks operational scope | `scripts/stop-gap.sh` | TPM owns: retry budgets, deadlock detection, Factory Incident Report |
+| 5 | Stop conditions too simple | `config/stop-gap.yaml` | Replace with comprehensive `stop_conditions` (max_attempts, max_runtime, no_progress_cycles, identical_failures, max_failed_agents) |
+| 6 | No Factory Incident Report on halt | TPM module | TPM generates full audit trail when execution stops |
+| 7 | `run-kata.sh` is serial bash, not agent-driven | `scripts/run-kata.sh` | Replace with TPM-driven pull model |
+| 8 | `ISSUES.md` is template only | `ISSUES.md` | Populate with 5-10 real issues from onthemarkdata/petri |
+| 9 | Agent CLI syntax unverified | `agents.sh` | Test against actual `openclaw --help` output |
 | 10 | Evidence collection uses shell templating | `scripts/evidence.sh` | Use kata --agent JSON for real metrics |
 
 ---
@@ -274,21 +509,18 @@ Checkpoint at each stage transition:
 | File | Purpose |
 |------|---------|
 | `scripts/sfai.sh` | **Main CLI tool** — `sfai -repo <url> run` entry point |
-| `config/agentgateway.yaml` | Gateway config (referenced, missing) |
-| `config/stop-gap.yaml` | Stop-gap thresholds (default: 3 failures, 3 rework loops) |
-| `scripts/stop-gap.sh` | Central stop-gap check — polls `[stop]` katas on the board |
-| `scripts/orchestrate.sh` | Agent orchestration loop |
-| `scripts/advance-gate.sh` | Advance katas through one gate |
-| `scripts/stage-usb.sh` | Stage binaries/weights/repos to USB |
+| `config/stop-gap.yaml` | Stop conditions (max_attempts: 5, max_runtime: 45m, etc.) |
+| `scripts/stop-gap.sh` | TPM stop condition checks + Factory Incident Report generation |
+| `scripts/orchestrate.sh` | TPM-driven agent orchestration loop |
+| `scripts/advance-gate.sh` | Advance katas through one gate with YAML task artifacts |
 
 ## Files to Modify
 
 | File | Change |
 |------|--------|
-| `scripts/sfai.sh` | **Create** — main CLI entry point for the factory |
-| `scripts/setup.sh` | Add `--offline` flag, venv creation, fix URLs |
-| `scripts/run-kata.sh` | Replace with orchestrate.sh + stop-gap + sfai integration |
-| `scripts/serve.sh` | Gate agentgateway.yaml reference behind file existence check |
+| `scripts/sfai.sh` | Add Tech Lead analysis step before TPM kata creation; produce YAML task artifacts |
+| `scripts/run-kata.sh` | Replace with orchestrate.sh + TPM pull model + stop conditions |
+| `scripts/orchestrate.sh` | Implement new workflow order (Tech Lead → PM → Architect opt → Impl → QA → Docs); structured YAML artifacts; Architect gating |
 | `scripts/agents.sh` | Verify CLI syntax matches actual OpenClaw |
 | `ISSUES.md` | Populate with 5-10 real issues from onthemarkdata/petri |
 | `scripts/evidence.sh` | Real data from kata --agent JSON |

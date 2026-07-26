@@ -140,7 +140,8 @@ This approach reduces prompt drift and improves reproducibility across model swa
 Target: **NVIDIA GB10 (DGX Spark)** — Linux/aarch64  
 Stack fallback: NemoClaw → OpenShell → OpenClaw  
 Corpus: `onthemarkdata/petri`  
-CLI: `sfai -repo <url> run` — single entry point for the factory  
+CLI: `sfai -repo <url> run` — entry point for the factory  
+CLI: `sfai create artifact -p "prompt" [-t tag]` — Tech Lead builds HTML visualization  
 Pipeline: `sfai run` → fetch issues → Tech Lead analyzes → TPM creates katas → agents fix → close (with stop-gap)
 
 ---
@@ -207,10 +208,11 @@ pip install openclaw      # fallback
 - Referenced by `serve.sh` but missing
 - Minimal config: localhost endpoint, OTel disabled for MVP, per-role model routing
 
-### [x] 10. Create `scripts/sfai.sh` CLI tool — DONE (run/status/help; `run` fetches GitHub issues → creates katas; hands off to orchestrate.sh when P2 lands)
+### [x] 10. Create `scripts/sfai.sh` CLI tool — DONE (run/status/create artifact/help; `run` fetches GitHub issues → creates katas; `create artifact` invokes Tech Lead to build HTML visualization)
 - Bash script — single entry point for the factory
 - Usage: `./sfai.sh -repo "https://github.com/onthemarkdata/petri" run`
-- Subcommands: `run`, `status`, `help`
+- Usage: `./sfai.sh create artifact -p "Show current progress" -t "progress-dashboard"`
+- Subcommands: `run`, `status`, `create artifact`, `help`
 - MVP: simple bash, expandable later
 
 ---
@@ -288,6 +290,7 @@ kata close <id> --done --message "Fixed" --commit <sha>  # close with evidence
 | `[spike]` | Investigation | Tech Lead → Architect |
 | `[docs]` | Documentation | Docs Engineer |
 | `[stop]` | Manual stop-gap | TPM halts pipeline |
+| `[artifact]` | Visualization | Tech Lead produces HTML artifact |
 
 ### [ ] 17. Implement stop conditions & Factory Incident Report
 **The TPM enforces stop conditions** — not the Tech Lead. The TPM continuously monitors execution and halts when predefined operational limits are reached.
@@ -448,7 +451,22 @@ What `sfai run` does:
 7. On halt: TPM generates Factory Incident Report
 8. Prints summary when all katas are done or stopped
 
-### [ ] 20. Add TPM checkpoints
+### [ ] 20. Tech Lead artifact creation (`sfai create artifact`)
+**The Tech Lead produces visual HTML documents** on demand via:
+
+```bash
+./sfai.sh create artifact -p "Show current progress of all open katas" -t "progress-dashboard"
+```
+
+Flow:
+1. `sfai` gathers context (kata board state, git log, corpus diff stats)
+2. Sends context + user prompt to the Tech Lead's model via llama-swap
+3. Tech Lead generates a self-contained HTML document (offline-ready, dark theme, embedded CSS/JS, no external deps)
+4. Output saved to `evidence/artifacts/<tag>-<timestamp>.html`
+
+Tech Lead SOUL.md updated to include artifact creation as a core responsibility.
+
+### [ ] 21. Add TPM checkpoints
 Checkpoint at each stage transition — TPM evaluates before allowing advance:
 - `intaken → scoped`: Tech Lead analysis complete, task artifact valid?
 - `scoped → designed`: PM acceptance criteria defined?
@@ -482,20 +500,20 @@ Checkpoint at each stage transition — TPM evaluates before allowing advance:
 
 ## P4 — Evidence & Baseline
 
-### [ ] 21. Run walking skeleton
+### [ ] 22. Run walking skeleton
 ```bash
 ./sfai.sh -repo "https://github.com/onthemarkdata/petri" run
 # Watch the pipeline: fetch issues → create katas → agents fix petri → close
 ```
 
-### [ ] 22. Collect evidence
+### [ ] 23. Collect evidence
 ```bash
 ./scripts/evidence.sh
 ```
 - Currently writes a template to `evidence/evidence-table.md`
 - **Enhance**: pull real data from `kata list --agent --json` and agentgateway OTel
 
-### [ ] 23. Baseline comparison
+### [ ] 24. Baseline comparison
 ```bash
 ./scripts/baseline.sh -repo "https://github.com/onthemarkdata/petri"
 ```
@@ -508,11 +526,12 @@ Checkpoint at each stage transition — TPM evaluates before allowing advance:
 
 | File | Purpose |
 |------|---------|
-| `scripts/sfai.sh` | **Main CLI tool** — `sfai -repo <url> run` entry point |
+| `scripts/sfai.sh` | **Main CLI tool** — `sfai -repo <url> run` + `sfai create artifact -p "..."` |
 | `config/stop-gap.yaml` | Stop conditions (max_attempts: 5, max_runtime: 45m, etc.) |
 | `scripts/stop-gap.sh` | TPM stop condition checks + Factory Incident Report generation |
 | `scripts/orchestrate.sh` | TPM-driven agent orchestration loop |
 | `scripts/advance-gate.sh` | Advance katas through one gate with YAML task artifacts |
+| `evidence/artifacts/` | Output directory for Tech Lead HTML visualizations (created by sfai) |
 
 ## Files to Modify
 
@@ -551,10 +570,12 @@ Checkpoint at each stage transition — TPM evaluates before allowing advance:
 10:00 — kata init + OpenClaw install
 10:30 — NemoClaw install (or fallback)
 11:00 — Wire 7 agents, test agent start/stop
-11:30 — Build `scripts/sfai.sh` CLI, create config/agentgateway.yaml, config/stop-gap.yaml
+11:30 — Build `scripts/sfai.sh` CLI, create config/stop-gap.yaml
+11:45 — Test: `./sfai.sh create artifact -p "Show current board state" -t "test"`
 12:00 — Walking skeleton: `./sfai.sh -repo "https://github.com/onthemarkdata/petri" run`
 12:30 — Verify: issues fetched, katas created, agents fixing petri
 13:00 — Stop-gap test (force a failure, verify halt)
+13:30 — Tech Lead artifact: `./sfai.sh create artifact -p "Progress report" -t "daily"`
 14:00 — Small-sample run (sfai on petri with 5 katas)
 15:00 — Baseline comparison
 16:00 — Evidence collection

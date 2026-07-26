@@ -1,0 +1,16 @@
+diagnosis: Test failed with AttributeError because petri.engine.processor.grow_loop does not exist. The
+  function name or module path was incorrectly guessed. Python mocking requires patching at the exact
+  import/call location, not a guessed definition path.
+revised_task:
+  objective: Identify the correct function/method name for the grow loop and patch it at its usage site
+    to force a failure, then verify the stop-gap mechanism triggers correctly.
+  constraints:
+  - Patch at the exact module path where the function is called or imported
+  - Use monkeypatch.setattr or unittest.mock.patch with the verified path
+  - Maintain isolation and mock external I/O
+  - Keep assertions focused on stop-gap trigger (stop file creation or termination state)
+guidance: 1. Run grep -r "def grow_loop" corpus/petri/engine/ to find the exact signature and module.
+  2. If it's a class method, patch the class. If it's a function, patch the module where it's imported.
+  3. Replace the broken monkeypatch.setattr call with the verified path. 4. Ensure the mock raises the
+  expected exception type or returns the expected failure state that the stop-gap listens for. 5. Re-run
+  tests.

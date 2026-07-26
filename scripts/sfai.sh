@@ -78,26 +78,34 @@ cmd_run() {
     issues_json="$(curl -sf "https://api.github.com/repos/$slug/issues?state=open&per_page=100")" \
         || { echo "ERROR: GitHub API fetch failed" >&2; exit 1; }
 
-    # 3. Create katas (idempotent: skip titles already on the board)
+    # 3. Create katas with full issue bodies (idempotent via gh-<n> key)
     echo "--- Creating katas ---"
-    local created=0 skipped=0
-    while IFS=$'\t' read -r number title; do
-        [ -n "$number" ] || continue
-        local desc="[bug] gh-$number: $title"
-        if (cd "$FACTORY_DIR" && kata list --json 2>/dev/null | grep -qF "gh-$number:"); then
-            skipped=$((skipped+1))
-        else
-            (cd "$FACTORY_DIR" && kata create "$desc" >/dev/null)
-            created=$((created+1))
-            echo "  + $desc"
-        fi
-    done < <(echo "$issues_json" | python3 -c '
-import json, sys
+    echo "$issues_json" | FACTORY_DIR="$FACTORY_DIR" python3 -c '
+import json, os, subprocess, sys
+factory = os.environ["FACTORY_DIR"]
+def kata(*a, **kw):
+    return subprocess.run(["kata", *a], cwd=factory, capture_output=True, text=True, **kw)
+existing = kata("list", "--json").stdout
+created = skipped = 0
 for i in json.load(sys.stdin):
-    if "pull_request" in i:  # skip PRs
+    if "pull_request" in i:
         continue
-    print(str(i["number"]) + "\t" + i["title"])')
-    echo "Created $created katas ($skipped already on board)"
+    key = f"gh-{i[\"number\"]}:"
+    if key in existing:
+        skipped += 1
+        continue
+    body = (i.get("body") or "(no description on GitHub)") + (
+        "\n\n---\nSource: " + i["html_url"]
+        + "\nGitHub labels: " + (", ".join(l["name"] for l in i.get("labels", [])) or "none")
+        + "\nOpened by: " + i["user"]["login"])
+    title = f"[bug] {key} {i[\"title\"]}"
+    r = kata("create", title, "--body", body, "--idempotency-key", f"gh-{i[\"number\"]}")
+    if r.returncode == 0:
+        created += 1
+        print("  +", title)
+    else:
+        print("  FAILED", title, r.stderr.strip()[:80])
+print(f"Created {created} katas ({skipped} already on board)")'
 
     # 4. Orchestration (P2 — not yet implemented)
     echo ""

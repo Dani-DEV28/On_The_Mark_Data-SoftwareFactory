@@ -2,9 +2,9 @@
 
 Target: **NVIDIA GB10 (DGX Spark)** — Linux/aarch64  
 Stack fallback: NemoClaw → OpenShell → OpenClaw  
-Corpus: `pallets/click`  
-Issue source: KataTracker (kata CLI as issue tracker and board)  
-Pipeline: Review issues → agents use kata board → fix (with stop-gap)
+Corpus: `onthemarkdata/petri`  
+CLI: `sfai -repo <url> run` — single entry point for the factory  
+Pipeline: `sfai run` → fetch issues → create katas → agents fix → close (with stop-gap)
 
 ---
 
@@ -17,9 +17,10 @@ Pipeline: Review issues → agents use kata board → fix (with stop-gap)
 
 ### [ ] 2. Clone corpus repo
 ```bash
-git clone https://github.com/pallets/click.git corpus/
+git clone https://github.com/onthemarkdata/petri.git corpus/
 ```
 - `corpus/` is currently empty (`.gitkeep` only)
+- The petri repo is both the source of issues AND the target to fix
 
 ### [ ] 3. Stage remaining binaries to `stage/`
 | Binary | Source | Target |
@@ -69,11 +70,17 @@ pip install openclaw      # fallback
 - Referenced by `serve.sh` but missing
 - Minimal config: localhost endpoint, OTel disabled for MVP, per-role model routing
 
+### [ ] 10. Create `scripts/sfai.sh` CLI tool
+- Bash script — single entry point for the factory
+- Usage: `./sfai.sh -repo "https://github.com/onthemarkdata/petri" run`
+- Subcommands: `run`, `status`, `help`
+- MVP: simple bash, expandable later
+
 ---
 
 ## P1 — Stack Setup: NemoClaw / OpenShell / OpenClaw
 
-### [ ] 10. Attempt NemoClaw (preferred)
+### [ ] 11. Attempt NemoClaw (preferred)
 ```bash
 nemoclaw onboard --non-interactive --provider ollama
 ```
@@ -81,26 +88,26 @@ nemoclaw onboard --non-interactive --provider ollama
 - Automatically provisions OpenShell sandbox + OpenClaw agents
 - **Policy files already ready**: `network.yaml`, `filesystem.yaml`, `process.yaml`, `inference.yaml`
 
-### [ ] 11. Fallback: OpenShell direct
+### [ ] 12. Fallback: OpenShell direct
 ```bash
 curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh
 ```
 - Manual sandbox + RBAC policies (translate from NemoClaw format)
 - No blueprint verification; loses NemoClaw lifecycle management
 
-### [ ] 12. Fallback: OpenClaw only
+### [ ] 13. Fallback: OpenClaw only
 ```bash
 openclaw agent start --name <role> --soul <path> --model auto
 ```
 - No sandbox, no RBAC — agents run natively on host
 - **Script gap**: `agents.sh` uses this syntax — needs verification against actual OpenClaw CLI
 
-### [ ] 13. Wire all 7 agents
+### [ ] 14. Wire all 7 agents
 - SOUL.md files ready: `tech-lead`, `product-manager`, `architect`, `devops-qa`, `tpm`, `implementer`, `docs-engineer`
 - `config/openclaw/tools.yaml` defines available tools (kata, git, sandbox, fs)
 - **Verify**: each agent can start, list katas, and claim work
 
-### [ ] 14. Fix `setup.sh` for air-gapped GB10
+### [ ] 15. Fix `setup.sh` for air-gapped GB10
 - Current: `curl https://www.nvidia.com/nemoclaw.sh | bash` (requires internet)
 - **Need**: `--offline` flag that uses staged binaries from `stage/`
 - **Need**: venv creation for python tools (kata, agentgateway)
@@ -110,13 +117,14 @@ openclaw agent start --name <role> --soul <path> --model auto
 
 ## P2 — MVP Pipeline: Issue Review → Fix
 
-### [ ] 15. Issue intake via KataTracker
-**KataTracker is the issue tracker.** The kata board IS the message bus — no separate issue database.
+### [ ] 16. Issue intake via GitHub API on petri repo
+**Issues come from the petri repo's GitHub Issues API.** The `sfai` CLI fetches them and creates katas.
 
-Issues enter the board via one of:
-1. **Human creates** a kata: `kata create "[bug] environment variable fails on Windows"`
-2. **Agent discovers** an issue during work and files it: `kata create "[issue] QA failed: test_core.py regression"`
-3. **Intake script** reads a source (ISSUES.md, GitHub API) and creates katas for seed data
+`sfai run` flow:
+1. Clone/fetch `https://github.com/onthemarkdata/petri` into `corpus/`
+2. Call `GET https://api.github.com/repos/onthemarkdata/petri/issues` to fetch open issues
+3. For each issue, create a kata: `kata create "[bug] <title from GitHub>"`
+4. The kata board now holds all issues as work items
 
 All issues and features live on the same board. Agents organize by polling the board:
 
@@ -138,7 +146,7 @@ kata close <id> --done --message "Fixed" --commit <sha>  # close with evidence
 | `[docs]` | Documentation | Docs Engineer |
 | `[stop]` | Manual stop-gap | Halts pipeline |
 
-### [ ] 16. Implement stop-gap mechanism
+### [ ] 17. Implement stop-gap mechanism
 **Central stop-gap module**: `scripts/stop-gap.sh`
 
 Checked at each pipeline gate. Halts pipeline if:
@@ -160,7 +168,7 @@ halt_on_critical_error: true
 manual_override: false
 ```
 
-### [ ] 17. Build agent orchestration
+### [ ] 18. Build agent orchestration
 **Replace `run-kata.sh`** (currently serial bash with no real agent coordination).
 
 **Pull model** — the kata board is the organizing backbone. All agents use `kata` CLI to find, claim, and advance work:
@@ -186,19 +194,20 @@ while true; do
 done
 ```
 
-### [ ] 18. Wire end-to-end pipeline
+### [ ] 19. Wire end-to-end pipeline
 ```bash
-# Full flow:
-./scripts/orchestrate.sh                          # agent orchestration loop
-# In another terminal — seed the board with issues:
-kata create "[bug] environment variable override not working on Windows"
-kata create "[feature] add --timeout flag to Click commands"
-# Or batch from a file:
-kata create --batch issues.txt
-# Watch agents pick up katas and advance them through gates
+# Single command does it all:
+./sfai.sh -repo "https://github.com/onthemarkdata/petri" run
 ```
+What `sfai run` does:
+1. Clones petri to `corpus/` if not present
+2. Fetches open issues from GitHub Issues API
+3. Creates katas: `kata create "[bug] <title>"`
+4. Starts agent orchestration loop (agents claim, fix, test, close)
+5. Runs stop-gap checks at each transition
+6. Prints summary when all katas are done
 
-### [ ] 19. Add stop-gap checkpoints
+### [ ] 20. Add stop-gap checkpoints
 Checkpoint at each stage transition:
 - `briefed → scoped`: intake parsed correctly?
 - `scoped → designed`: design is feasible?
@@ -217,7 +226,7 @@ Checkpoint at each stage transition:
 | 3 | `run-kata.sh` is serial bash, not agent-driven | `scripts/run-kata.sh` | Replace with `orchestrate.sh` + `advance-gate.sh` |
 | 4 | No issue intake via kata CLI | missing | Use `kata create` directly — agents file issues as katas |
 | 5 | No stop-gap mechanism | missing | New `scripts/stop-gap.sh` + `config/stop-gap.yaml` |
-| 6 | `ISSUES.md` is template only | `ISSUES.md` | Populate with 5-10 real issues from pallets/click |
+| 6 | `ISSUES.md` is template only | `ISSUES.md` | Populate with 5-10 real issues from onthemarkdata/petri |
 | 7 | `scripts/stage-usb.sh` missing | referenced in PREP.md | Create for USB staging |
 | 8 | Agent CLI syntax unverified | `agents.sh` | Test against actual `openclaw --help` output |
 | 9 | No venv for python deps | `setup.sh` | Create `.venv` for kata, agentgateway, etc. |
@@ -227,28 +236,25 @@ Checkpoint at each stage transition:
 
 ## P4 — Evidence & Baseline
 
-### [ ] 20. Run walking skeleton
+### [ ] 21. Run walking skeleton
 ```bash
-./scripts/orchestrate.sh &
-sleep 5
-kata create "[feature] add --timeout flag to Click commands"
-# Watch one full kata flow through all 7 gates on the kata board
+./sfai.sh -repo "https://github.com/onthemarkdata/petri" run
+# Watch the pipeline: fetch issues → create katas → agents fix petri → close
 ```
 
-### [ ] 21. Collect evidence
+### [ ] 22. Collect evidence
 ```bash
 ./scripts/evidence.sh
 ```
 - Currently writes a template to `evidence/evidence-table.md`
 - **Enhance**: pull real data from `kata list --agent --json` and agentgateway OTel
 
-### [ ] 22. Baseline comparison
+### [ ] 23. Baseline comparison
 ```bash
-./scripts/baseline.sh "Add --timeout flag to Click commands"
+./scripts/baseline.sh -repo "https://github.com/onthemarkdata/petri"
 ```
-- Currently writes a template to `evidence/baseline/`
-- Single agent, no org, same issue
-- Compare cycle time, quality, tokens
+- Single agent, no org, same issues
+- Compare cycle time, quality, tokens vs factory
 
 ---
 
@@ -256,6 +262,7 @@ kata create "[feature] add --timeout flag to Click commands"
 
 | File | Purpose |
 |------|---------|
+| `scripts/sfai.sh` | **Main CLI tool** — `sfai -repo <url> run` entry point |
 | `config/agentgateway.yaml` | Gateway config (referenced, missing) |
 | `config/stop-gap.yaml` | Stop-gap thresholds (default: 3 failures, 3 rework loops) |
 | `scripts/stop-gap.sh` | Central stop-gap check — polls `[stop]` katas on the board |
@@ -267,11 +274,12 @@ kata create "[feature] add --timeout flag to Click commands"
 
 | File | Change |
 |------|--------|
+| `scripts/sfai.sh` | **Create** — main CLI entry point for the factory |
 | `scripts/setup.sh` | Add `--offline` flag, venv creation, fix URLs |
-| `scripts/run-kata.sh` | Replace with agent orchestration + stop-gap |
+| `scripts/run-kata.sh` | Replace with orchestrate.sh + stop-gap + sfai integration |
 | `scripts/serve.sh` | Gate agentgateway.yaml reference behind file existence check |
 | `scripts/agents.sh` | Verify CLI syntax matches actual OpenClaw |
-| `ISSUES.md` | Populate with real corpus issues (seed data for kata intake) |
+| `ISSUES.md` | Populate with 5-10 real issues from onthemarkdata/petri |
 | `scripts/evidence.sh` | Real data from kata --agent JSON |
 
 ## What's Already Ready (no changes needed)
@@ -295,16 +303,16 @@ kata create "[feature] add --timeout flag to Click commands"
 
 ```
 09:00 — Hardware setup + rsync stage → GB10
-09:15 — Verify vLLM + llama-swap already running (already implemented)
+09:15 — Verify vLLM + llama-swap already running
 09:30 — Start agentgateway (serve.sh), create missing configs
 10:00 — kata init + OpenClaw install
 10:30 — NemoClaw install (or fallback)
 11:00 — Wire 7 agents, test agent start/stop
-11:30 — Create config/agentgateway.yaml, config/stop-gap.yaml
-12:00 — Walking skeleton: 1 kata through all gates
-12:30 — Seed the kata board: `kata create "[bug] ..."`, run full pipeline
+11:30 — Build `scripts/sfai.sh` CLI, create config/agentgateway.yaml, config/stop-gap.yaml
+12:00 — Walking skeleton: `./sfai.sh -repo "https://github.com/onthemarkdata/petri" run`
+12:30 — Verify: issues fetched, katas created, agents fixing petri
 13:00 — Stop-gap test (force a failure, verify halt)
-14:00 — Small-sample run (5 katas)
+14:00 — Small-sample run (sfai on petri with 5 katas)
 15:00 — Baseline comparison
 16:00 — Evidence collection
 17:00 — Code freeze

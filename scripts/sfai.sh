@@ -90,16 +90,18 @@ created = skipped = 0
 for i in json.load(sys.stdin):
     if "pull_request" in i:
         continue
-    key = f"gh-{i[\"number\"]}:"
+    n = i["number"]
+    key = f"gh-{n}:"
     if key in existing:
         skipped += 1
         continue
+    labels = ", ".join(l["name"] for l in i.get("labels", [])) or "none"
     body = (i.get("body") or "(no description on GitHub)") + (
         "\n\n---\nSource: " + i["html_url"]
-        + "\nGitHub labels: " + (", ".join(l["name"] for l in i.get("labels", [])) or "none")
+        + "\nGitHub labels: " + labels
         + "\nOpened by: " + i["user"]["login"])
-    title = f"[bug] {key} {i[\"title\"]}"
-    r = kata("create", title, "--body", body, "--idempotency-key", f"gh-{i[\"number\"]}")
+    title = "[bug] " + key + " " + i["title"]
+    r = kata("create", title, "--body", body, "--idempotency-key", f"gh-{n}")
     if r.returncode == 0:
         created += 1
         print("  +", title)

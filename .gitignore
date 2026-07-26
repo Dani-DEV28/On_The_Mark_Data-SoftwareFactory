@@ -4,3 +4,18 @@ corpus/
 *.gguf
 *.bin
 *.safetensors
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv-vllm/
+
+# Env / secrets
+.env
+
+# Logs
+*.log

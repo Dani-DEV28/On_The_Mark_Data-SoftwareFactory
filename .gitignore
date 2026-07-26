@@ -1,0 +1,6 @@
+models/
+stage/
+corpus/
+*.gguf
+*.bin
+*.safetensors

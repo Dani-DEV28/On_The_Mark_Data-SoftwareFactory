@@ -2,83 +2,88 @@
 
 The kata board is the coordination mechanism for the software factory. No custom queue — each work item is a kata with stable IDs.
 
+State lives in SQLite under `KATA_HOME`. Your repo stays clean — only a small `.kata.toml` is committed.
+
+## Setup
+
+```bash
+cd software-factory
+kata init                    # bind this workspace to a kata project
+kata init --with-agents      # also writes managed briefing into AGENTS.md
+```
+
 ## Usage
 
 ```bash
-# Create a feature kata
-kata create --type feature --brief "Add CLI timeout flag with tests"
+# Create issues (prints short id, e.g. abc4)
+kata create "add --timeout flag to Click commands"
+kata create "fix pytest failure on Windows path separator"
+kata create "investigate vLLM NVFP4 issue on GB10"
 
-# Create an issue kata
-kata create --type issue --brief "pytest fails on Windows: path separator"
+# List open work
+kata list
 
-# Create a spike kata
-kata create --type spike --brief "Investigate vLLM NVFP4 issue on GB10"
+# Inspect by short id
+kata show abc4
 
-# Claim a kata
-kata claim <id> --agent <role>
+# Claim work (agent assigns itself)
+kata claim abc4
 
-# Check status
-kata status <id>
+# Close with evidence (only when verified)
+kata close abc4 --done \
+  --message "Fixed the issue and verified tests pass." \
+  --commit <sha>
 
-# Advance to next gate
-kata advance <id> --to <status>
-
-# List all katas
-kata list --all
-
-# List by status
-kata list --status in-progress
-
-# Get JSON output (for evidence table)
-kata list --all --agent
+# Interactive TUI (browse, triage, supervise)
+kata tui
 ```
 
-## Status Flow (Feature)
+## Agent Output
 
-```
-briefed → scoped → designed → in-progress → in-review → documented → done
-```
+All commands support `--json` and `--agent` flags for machine-readable output:
 
-## Status Flow (Issue)
-
-```
-identified → triaged → in-progress → resolved → closed
+```bash
+kata list --agent             # JSON for agent consumption
+kata show abc4 --agent        # structured issue details
+kata list --json              # raw JSON
 ```
 
-## Kata Types
+## Issue Lifecycle
 
-| Type | Purpose | Example |
-|------|---------|---------|
-| `feature` | Normal work item | "Add CLI timeout flag with tests" |
-| `issue` | Bug, blocker, rework | "pytest fails on Windows" |
-| `spike` | Investigation | "Test vLLM NVFP4 compatibility" |
-
-## Role → Gate Mapping
-
-| Role | Claims at gate |
-|------|---------------|
-| Tech Lead | `documented` (final review) |
-| Product Manager | `briefed` (decompose) |
-| Architect | `scoped` (design) |
-| Implementer | `in-progress` (code) |
-| DevOps+QA | `in-review` (test) |
-| TPM | Any (heartbeat, triage) |
-| Docs Engineer | `documented` (docs) |
-
-## JSON Output (for Evidence)
-
-```json
-{
-  "id": "KATA-001",
-  "type": "feature",
-  "status": "done",
-  "brief": "Add CLI timeout flag with tests",
-  "created_at": "2026-07-26T10:00:00Z",
-  "completed_at": "2026-07-26T11:30:00Z",
-  "assigned_to": "devops-qa",
-  "rework_count": 1,
-  "issue_count": 2,
-  "cycle_time_minutes": 90,
-  "tokens_used": 15420
-}
 ```
+created → claimed → closed (with --done and evidence)
+```
+
+Closing is explicit: you must provide a `--message` explaining what was done and optionally a `--commit` SHA as proof.
+
+## Kata Types (via description)
+
+kata doesn't have a `--type` flag — the issue type is encoded in the description:
+
+```bash
+kata create "[feature] add --timeout flag"
+kata create "[bug] fix pytest failure on Windows"
+kata create "[spike] investigate vLLM NVFP4 compatibility"
+```
+
+## Role → Command Mapping
+
+| Role | Commands |
+|------|----------|
+| Tech Lead | `kata create`, `kata close`, `kata show` |
+| Product Manager | `kata create`, `kata list`, `kata show` |
+| Architect | `kata create` (issues), `kata show`, `kata claim` |
+| DevOps+QA | `kata claim`, `kata close --done --commit <sha>` |
+| TPM | `kata list`, `kata tui`, `kata claim` |
+| Implementer | `kata claim`, `kata close --done` |
+| Docs Engineer | `kata claim`, `kata close --done` |
+
+## For Agents
+
+Run `kata quickstart` (alias `kata agent-instructions`) for the full operating contract:
+
+- Search before creating (avoid duplicates)
+- Pass an idempotency key on create
+- Prefer `--agent` output
+- Claim work with `kata claim`
+- Close only when work is verified, with evidence and a substantive message

@@ -9,22 +9,26 @@ A seven-role AI software team running entirely on NVIDIA GB10 Grace Blackwell ha
 ## Quick Start
 
 ```bash
-# 1. Setup (NemoClaw preferred, fallback chain automated)
+# 1. Init kata workspace
+cd software-factory
+kata init --with-agents
+
+# 2. Setup stack (NemoClaw preferred, fallback chain automated)
 ./scripts/setup.sh
 
-# 2. Start serving plane (vLLM + llama-swap + agentgateway)
+# 3. Start serving plane (vLLM + llama-swap + agentgateway)
 ./scripts/serve.sh
 
-# 3. Launch all 7 agent roles
+# 4. Launch all 7 agent roles
 ./scripts/agents.sh
 
-# 4. Run a kata through the pipeline
+# 5. Run a kata through the pipeline
 ./scripts/run-kata.sh "Add a --timeout flag to Click commands"
 
-# 5. Collect evidence
+# 6. Collect evidence
 ./scripts/evidence.sh
 
-# 6. Teardown (tailscale logout, remove tokens)
+# 7. Teardown (tailscale logout, remove tokens)
 ./scripts/teardown.sh
 ```
 
@@ -79,49 +83,55 @@ Only one of NemoClaw, OpenShell, or OpenClaw is required. The setup script autom
 
 ## AI Models
 
-Three models loaded on the GB10. Only one is needed for basic operation; all three are available for optimal role assignment.
+### Phase 1: Walking Skeleton — One Small Model
 
-| Model | Size | Roles | Why |
-|-------|------|-------|-----|
-| **Gemini 4** (Gemma 3 27B GGUF) | 27B | Tech Lead, PM, TPM, Docs | Strong reasoning, structured output |
-| **NVIDIA Nemotron 3 Super** | 120B | Architect, DevOps+QA | Deep technical analysis, system thinking |
-| **Qwen 3.6** (Qwen3 32B GGUF) | 32B | Implementers | Excellent code generation |
+Use a single small model for **all seven roles** to get the end-to-end pipeline working fast.
+
+| Model | Size | Why |
+|-------|------|-----|
+| **Qwen 3 1.7B** (Q8_0 GGUF) | 1.7B | Fast inference, low memory, gets the skeleton walking |
+
+All 7 roles share this model. The factory works — just slower and less capable.
+
+### Phase 2: Scale Up — Role-Specific Models
+
+After the skeleton walks, swap in role-optimized models:
+
+| Model | Size | Roles |
+|-------|------|-------|
+| **Gemini 4** (Gemma 3 27B GGUF) | 27B | Tech Lead, PM, TPM, Docs |
+| **NVIDIA Nemotron 3 Super** | 120B | Architect, DevOps+QA |
+| **Qwen 3.6** (Qwen3 32B GGUF) | 32B | Implementers |
 
 ### Model Loading
 
-Models are served via **vLLM** with **llama-swap** providing hot-swap and concurrent model matrix. With 128GB unified memory on GB10, all three can load simultaneously.
-
-```
-Role                 → Model              → Concurrent?
-─────────────────────────────────────────────────────────
-Tech Lead            → Gemini 4           → Yes
-Product Manager      → Gemini 4           → Yes (shared)
-Architect            → Nemotron 3 Super   → Yes
-DevOps + QA          → Nemotron 3 Super   → Yes (shared)
-TPM                  → Gemini 4           → Yes (shared)
-Software Implementer → Qwen 3.6           → Yes
-Docs Engineer        → Gemini 4           → Yes (shared)
-```
+Models are served via **vLLM** with **llama-swap** providing hot-swap and concurrent model matrix. With 128GB unified memory on GB10, all three can load simultaneously in Phase 2.
 
 ### Fallback Chain
 
 ```
-Primary assignment fails → next available model → shared single model for all roles
+Phase 1: small model for all roles (fast, works now)
+    ↓
+Phase 2: role-specific models (better quality, needs more memory)
+    ↓
+Phase 3: single large model for all roles (if concurrent fails)
 ```
+
+**Config is in `config/llama-swap/config.yaml`.** Phase 1 models are uncommented and ready; Phase 2 models are commented out, swap in after the skeleton.
 
 ---
 
 ## The Org Chart
 
-| # | Role | Responsibility | Model | Git? | Sandbox? |
-|---|------|----------------|-------|------|----------|
-| 1 | **Tech Lead** | Human-facing pair partner; intake, final report | Gemini 4 | No | No |
-| 2 | **Product Manager** | Brief → prioritized katas with acceptance criteria | Gemini 4 | No | No |
-| 3 | **Software Architect** | Design notes per kata; cohesion/maintainability gate | Nemotron | No | No |
-| 4 | **DevOps + QA** | Local git management; runs tests in sandbox (network denied) | Nemotron | **Yes** | **Yes** |
-| 5 | **Technical Project Manager** | Owns kata board: creates, assigns, tracks, unblocks | Gemini 4 | No | No |
-| 6 | **Software Implementers** | Write the code | Qwen 3.6 | No | No |
-| 7 | **Docs Engineer** | README/CHANGELOG/config docs after merges | Gemini 4 | No | No |
+| # | Role | Responsibility | Model (Phase 1 → Phase 2) | Git? | Sandbox? |
+|---|------|----------------|---------------------------|------|----------|
+| 1 | **Tech Lead** | Human-facing pair partner; intake, final report | small → Gemini 4 | No | No |
+| 2 | **Product Manager** | Brief → prioritized katas with acceptance criteria | small → Gemini 4 | No | No |
+| 3 | **Software Architect** | Design notes per kata; cohesion/maintainability gate | small → Nemotron | No | No |
+| 4 | **DevOps + QA** | Local git management; runs tests in sandbox (network denied) | small → Nemotron | **Yes** | **Yes** |
+| 5 | **Technical Project Manager** | Owns kata board: creates, assigns, tracks, unblocks | small → Gemini 4 | No | No |
+| 6 | **Software Implementers** | Write the code | small → Qwen 3.6 | No | No |
+| 7 | **Docs Engineer** | README/CHANGELOG/config docs after merges | small → Gemini 4 | No | No |
 
 **RBAC enforced by OpenShell policies:** PM can't push code. Only DevOps+QA touches git or the sandbox.
 
@@ -129,49 +139,28 @@ Primary assignment fails → next available model → shared single model for al
 
 ## The Kata Board (Message Bus)
 
-No custom queue. Each work item is a kata with stable IDs. Statuses are the stage gates.
+No custom queue. Each work item is a kata with stable IDs. State lives in SQLite under `KATA_HOME` — your repo stays clean.
 
-### Feature Flow
-
-```
-briefed → scoped → designed → in-progress → in-review → documented → done
-```
-
-### Issue Flow
+### Issue Lifecycle
 
 ```
-identified → triaged → in-progress → resolved → closed
+created → claimed → closed (with --done and evidence)
 ```
-
-### Kata Types
-
-| Type | Purpose | Example |
-|------|---------|---------|
-| `feature` | Normal work item | "Add CLI timeout flag with tests" |
-| `issue` | Bug, blocker, rework | "pytest fails on Windows" |
-| `spike` | Investigation | "Test vLLM NVFP4 compatibility" |
-
-### Role → Gate Mapping
-
-| Role | Claims at gate |
-|------|---------------|
-| Tech Lead | `documented` (final review) |
-| Product Manager | `briefed` (decompose) |
-| Architect | `scoped` (design) |
-| Implementer | `in-progress` (code) |
-| DevOps+QA | `in-review` (test) |
-| TPM | Any (heartbeat, triage) |
-| Docs Engineer | `documented` (docs) |
 
 ### Commands
 
 ```bash
-kata create --type feature --brief "Add CLI timeout flag"
-kata claim KATA-001 --agent product-manager
-kata advance KATA-001 --to scoped
-kata list --all --agent              # JSON output for evidence
-kata list --status in-progress
+kata init                              # bind workspace
+kata create "add CLI timeout flag"     # create issue (prints short id)
+kata list                              # list open work
+kata show abc4                         # inspect by short id
+kata claim abc4                        # claim work
+kata close abc4 --done --message "Fixed it" --commit <sha>  # close with evidence
+kata tui                               # interactive browser
+kata quickstart                        # agent operating contract
 ```
+
+All commands support `--agent` and `--json` flags for machine-readable output.
 
 ---
 
@@ -196,9 +185,10 @@ software-factory/
 │       └── config.yaml                # Model hot-swap matrix
 │
 ├── models/
-│   ├── gemini-4/                      # Gemma 3 27B GGUF
-│   ├── nemotron/                      # Nemotron 3 Super 120B
-│   └── qwen3.6/                       # Qwen3 32B GGUF
+│   ├── small/                         # Qwen3 1.7B (Phase 1 — all roles)
+│   ├── gemini-4/                      # Gemma 3 27B GGUF (Phase 2)
+│   ├── nemotron/                      # Nemotron 3 Super 120B (Phase 2)
+│   └── qwen3.6/                       # Qwen3 32B GGUF (Phase 2)
 │
 ├── roles/                             # Role templates & checklists
 │   ├── 01-tech-lead/                  # intake + final report
@@ -209,10 +199,7 @@ software-factory/
 │   ├── 06-implementer/                # coding standards + tests
 │   └── 07-docs-engineer/              # README + CHANGELOG templates
 │
-├── kata-board/                        # The message bus
-│   ├── katas/                         # Active katas
-│   ├── archive/                       # Completed katas
-│   └── issues/                        # Issue katas
+├── kata-board/                        # The message bus (created by kata init)
 │
 ├── corpus/                            # Target OSS repo (pallets/click)
 ├── evidence/                          # Evidence table & snapshots
@@ -234,7 +221,7 @@ software-factory/
 | agentgateway | LLM gateway, OTel, budgets | Apache 2.0 | Recommended |
 | llama-swap | Model hot-swap, concurrent matrix | Apache 2.0 | Recommended |
 | vLLM | Local model serving | Apache 2.0 | Recommended |
-| [kata](https://github.com/nicholasgasior/kata) | Work items, claim flows | — | Required |
+| [kata](https://github.com/kenn-io/kata) | Local-first issue tracker (CLI + TUI) | MIT | Required |
 | [pallets/click](https://github.com/pallets/click) | Corpus repo (BSD-3) | BSD-3 | Default target |
 
 ---

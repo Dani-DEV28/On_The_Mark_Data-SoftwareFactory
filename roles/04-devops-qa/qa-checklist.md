@@ -1,6 +1,6 @@
 # QA Checklist — DevOps + QA
 
-## Before Each Kata Advance
+## Before Each Close
 
 - [ ] All existing tests still pass
 - [ ] New tests added for new functionality
@@ -11,21 +11,21 @@
 
 ## Git Checks
 
-- [ ] Branch follows naming convention: `feat/kata-XXX-description`
+- [ ] Branch follows naming convention
 - [ ] Commit messages follow convention
 - [ ] No merge conflicts with main
 - [ ] Squash merge clean
 
-## Issue Kata Creation
-
-If any check fails:
+## Closing with Evidence
 
 ```bash
-kata create --type issue --brief "QA failed: [specific failure]"
+kata close <id> --done \
+  --message "All tests pass. No regressions. No external calls." \
+  --commit $(git rev-parse HEAD)
 ```
 
-Include:
-- Which check failed
-- Error output
-- Suggested fix
-- Severity (blocks / non-blocking)
+## Issue Creation (if checks fail)
+
+```bash
+kata create "[issue] QA failed: <specific failure description>"
+```

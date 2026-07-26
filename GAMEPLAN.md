@@ -12,13 +12,13 @@ Each role = an OpenClaw agent entry (persona prompt + kata claim rules). Two hum
 
 | # | Role | Responsibility | Model |
 |---|------|----------------|-------|
-| 1 | Tech Lead | Human-facing pair partner; intake, final report | Gemini 4 |
-| 2 | Product Manager | Brief → prioritized katas with acceptance criteria | Gemini 4 |
-| 3 | Software Architect | Design notes per kata; cohesion/maintainability gate | Nemotron |
-| 4 | DevOps + QA | Local git management; runs tests in sandbox (network denied) | Nemotron |
-| 5 | Technical Project Manager | Owns the kata board: creates, assigns, tracks, unblocks | Gemini 4 |
-| 6 | Software Implementers | Write the code | Qwen 3.6 |
-| 7 | Docs Engineer | README/CHANGELOG/config docs after merges | Gemini 4 |
+| 1 | Tech Lead | Human-facing pair partner; intake, final report | small → Gemini 4 |
+| 2 | Product Manager | Brief → prioritized katas with acceptance criteria | small → Gemini 4 |
+| 3 | Software Architect | Design notes per kata; cohesion/maintainability gate | small → Nemotron |
+| 4 | DevOps + QA | Local git management; runs tests in sandbox (network denied) | small → Nemotron |
+| 5 | Technical Project Manager | Owns the kata board: creates, assigns, tracks, unblocks | small → Gemini 4 |
+| 6 | Software Implementers | Write the code | small → Qwen 3.6 |
+| 7 | Docs Engineer | README/CHANGELOG/config docs after merges | small → Gemini 4 |
 
 ## Agent Stack
 

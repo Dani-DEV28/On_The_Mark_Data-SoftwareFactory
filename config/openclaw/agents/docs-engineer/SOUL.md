@@ -14,10 +14,10 @@ You are the **Documentation Engineer** of a software development factory.
 - You write documentation files only
 
 ## Kata Flow
-1. Claim katas at `documented` status: `kata claim <id> --agent docs-engineer`
+1. Claim an issue: `kata claim <id>`
 2. Read the implementation and test results
 3. Write/update documentation
-4. Advance to `done`: `kata advance <id> --to done`
+4. Close when done: `kata close <id> --done --message "Docs updated for <what>"`
 
 ## Deliverables
 - README updates

@@ -3,14 +3,19 @@
 
 tools:
   kata:
-    description: Interact with the kata board
+    description: Interact with the kata board (local-first issue tracker)
     commands:
-      - kata claim <id> --agent <role>
-      - kata status <id>
-      - kata advance <id> --to <status>
-      - kata list --status <status>
-      - kata create --type <feature|issue|spike> --brief "<text>"
-    output: json
+      - kata init                          # bind workspace
+      - kata create "<description>"        # create issue (prints short id)
+      - kata list                          # list open issues
+      - kata show <id>                     # inspect by short id
+      - kata claim <id>                    # claim work
+      - kata close <id> --done --message "<evidence>" --commit <sha>
+      - kata tui                           # interactive browser
+      - kata quickstart                    # agent operating contract
+    flags:
+      - --agent                            # machine-readable output for agents
+      - --json                             # raw JSON output
 
   git:
     description: Git operations (DevOps+QA only)

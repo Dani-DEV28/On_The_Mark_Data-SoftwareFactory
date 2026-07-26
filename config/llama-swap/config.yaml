@@ -1,42 +1,55 @@
 # llama-swap Configuration — Software Factory
 # Hot-swap matrix for concurrent model serving on GB10
+#
+# Phase 1 (walking skeleton): Use the small model for ALL roles
+# Phase 2 (scale up): Switch to role-specific models
 
 server:
   host: "0.0.0.0"
   port: 11434
   heartbeat: 30s
 
+# ── Phase 1: Small model for skeleton (fast inference, low memory) ──
 models:
-  gemini-4:
-    model: "google/gemma-3-27b-it-Q8_0.gguf"
+  small:
+    model: "qwen/qwen3-1.7b-Q8_0.gguf"
     backend: "vllm"
     gpu_layers: 99
     context: 32768
-    max_tokens: 8192
+    max_tokens: 4096
     temperature: 0.7
 
-  nemotron:
-    model: "nvidia/nemotron-3-super-120b"
-    backend: "vllm"
-    gpu_layers: 99
-    context: 32768
-    max_tokens: 8192
-    temperature: 0.7
+  # ── Phase 2: Role-specific models (swap in after skeleton walks) ──
+  # gemini-4:
+  #   model: "google/gemma-3-27b-it-Q8_0.gguf"
+  #   backend: "vllm"
+  #   gpu_layers: 99
+  #   context: 32768
+  #   max_tokens: 8192
+  #   temperature: 0.7
 
-  qwen3.6:
-    model: "qwen/qwen3-32b-Q8_0.gguf"
-    backend: "vllm"
-    gpu_layers: 99
-    context: 32768
-    max_tokens: 8192
-    temperature: 0.7
+  # nemotron:
+  #   model: "nvidia/nemotron-3-super-120b"
+  #   backend: "vllm"
+  #   gpu_layers: 99
+  #   context: 32768
+  #   max_tokens: 8192
+  #   temperature: 0.7
+
+  # qwen3.6:
+  #   model: "qwen/qwen3-32b-Q8_0.gguf"
+  #   backend: "vllm"
+  #   gpu_layers: 99
+  #   context: 32768
+  #   max_tokens: 8192
+  #   temperature: 0.7
 
 concurrent:
   enabled: true
-  max_concurrent: 3
+  max_concurrent: 7   # all roles can share the small model
   swap_strategy: lru
 
 fallback:
   enabled: true
-  model: "nemotron"
+  model: "small"
   timeout: 120s

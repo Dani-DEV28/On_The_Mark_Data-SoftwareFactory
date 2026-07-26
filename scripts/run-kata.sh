@@ -1,64 +1,61 @@
 #!/usr/bin/env bash
-# Software Factory — Run a Single Kata
-# Usage: ./scripts/run-kata.sh "Brief description"
+# Software Factory — Run a Single Kata End-to-End
+# Usage: ./scripts/run-kata.sh "Description of the work"
 
 set -euo pipefail
 
 FACTORY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BRIEF="${1:?Usage: run-kata.sh \"Brief description\"}"
+DESCRIPTION="${1:?Usage: run-kata.sh \"Description of the work\"}"
+
+cd "$FACTORY_DIR"
 
 echo "=== Running Kata ==="
-echo "Brief: $BRIEF"
+echo "Description: $DESCRIPTION"
 
-# 1. Tech Lead creates the kata
+# 1. Create the issue
 echo ""
-echo "--- [Gate 0] Briefed ---"
-kata create --type feature --brief "$BRIEF"
-KATA_ID=$(kata list --status briefed --tail 1 --id)
-echo "Created kata: $KATA_ID"
+echo "--- Creating Issue ---"
+kata create "$DESCRIPTION"
+KATA_ID=$(kata list --agent | python3 -c "import sys,json; issues=json.load(sys.stdin); print(issues[-1]['id'])" 2>/dev/null || echo "check kata list")
+echo "Created issue: $KATA_ID"
 
 # 2. PM decomposes
 echo ""
-echo "--- [Gate 1] Scoped ---"
-kata claim "$KATA_ID" --agent product-manager
-# PM agent processes the brief...
-kata advance "$KATA_ID" --to scoped
+echo "--- PM Decomposition ---"
+kata show "$KATA_ID"
+# PM agent creates sub-issues if needed
 
 # 3. Architect designs
 echo ""
-echo "--- [Gate 2] Designed ---"
-kata claim "$KATA_ID" --agent architect
-# Architect agent produces design notes...
-kata advance "$KATA_ID" --to designed
+echo "--- Architect Design ---"
+kata show "$KATA_ID"
+# Architect agent produces design notes
 
 # 4. Implementer codes
 echo ""
-echo "--- [Gate 3] In Progress ---"
-kata claim "$KATA_ID" --agent implementer
-# Implementer agent writes code...
-kata advance "$KATA_ID" --to in-progress
+echo "--- Implementer Codes ---"
+kata claim "$KATA_ID"
+# Implementer agent writes code + tests
 
 # 5. DevOps+QA tests
 echo ""
-echo "--- [Gate 4] In Review ---"
-kata claim "$KATA_ID" --agent devops-qa
-# DevOps+QA agent runs tests in sandbox...
-kata advance "$KATA_ID" --to in-review
+echo "--- DevOps+QA Tests ---"
+sandbox exec --network-denied pytest -v
+# If tests pass, close with evidence
 
 # 6. Docs Engineer writes docs
 echo ""
-echo "--- [Gate 5] Documented ---"
-kata claim "$KATA_ID" --agent docs-engineer
-# Docs Engineer agent writes documentation...
-kata advance "$KATA_ID" --to documented
+echo "--- Docs Engineer ---"
+# Docs agent writes documentation
 
-# 7. Tech Lead reviews and closes
+# 7. Close with evidence
 echo ""
-echo "--- [Gate 6] Done ---"
-kata claim "$KATA_ID" --agent tech-lead
-# Tech Lead reviews final output...
-kata advance "$KATA_ID" --to done
+echo "--- Closing Issue ---"
+COMMIT_SHA=$(git rev-parse HEAD 2>/dev/null || echo "no-git")
+kata close "$KATA_ID" --done \
+  --message "Completed: $DESCRIPTION" \
+  --commit "$COMMIT_SHA"
 
 echo ""
 echo "=== Kata Complete ==="
-kata status "$KATA_ID"
+kata show "$KATA_ID"

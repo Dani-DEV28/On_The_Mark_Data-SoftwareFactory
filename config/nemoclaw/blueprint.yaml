@@ -49,9 +49,12 @@ agents:
     permissions: [read, write]
 
 inference:
-  provider: local-vllm
-  endpoint: http://localhost:8000/v1
+  provider: custom  # OpenAI-compatible (llama-swap)
+  endpoint: http://172.18.0.1:9292/v1  # llama-swap via docker bridge (localhost is wrong inside sandboxes)
+  # llama-swap model ids (one loaded at a time; mixed models cause swap churn).
+  # MVP: all roles resolve to qwen3.6-35b-a3b-fp8; swap per-role later if needed.
   models:
-    gemini-4: gemini-4
-    nemotron: nemotron
-    qwen3.6: qwen3.6
+    gemini-4: qwen3.6-35b-a3b-fp8
+    nemotron: qwen3.6-35b-a3b-fp8
+    qwen3.6: qwen3.6-35b-a3b-fp8
+    # nemotron-alt: nemotron-nano-30b   # available: nemotron-nano-30b, nemotron-super-120b, qwen3.6-27b

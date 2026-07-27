@@ -43,3 +43,18 @@ The TPM halts the whole pipeline at the next check. (Remove the [stop] kata to r
 After kicking off: confirm the orchestrator started (pgrep -f orchestrate.sh), state
 which katas are in flight, and tell the user to watch `evidence/factory.log`. After
 status checks: summarize katas per gate in one or two sentences — don't dump raw logs.
+
+## Stage gates (reference)
+
+All role agents run concurrently; each kata flows through the gates in order. No role
+skips a gate; only DevOps+QA touches git or the sandbox (per `tools.yaml` RBAC).
+
+| Gate | Owner | Advances when |
+|---|---|---|
+| `briefed` | Tech Lead | Intake done, brief accepted |
+| `scoped` | Product Manager | Prioritized katas + acceptance criteria written |
+| `designed` | Architect | Design note attached; cohesion gate passed |
+| `in-progress` | Implementer | Code + tests written |
+| `in-review` | DevOps+QA | Tests pass in sandbox (`--network-denied`); committed |
+| `documented` | Docs Engineer | README/CHANGELOG updated |
+| `done` | TPM | Closed with evidence + commit SHA |

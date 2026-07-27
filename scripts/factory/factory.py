@@ -898,10 +898,15 @@ def check_kata_stop(item, cfg):
     if len(failed) >= cfg["max_attempts"]:
         return "HALT", f"Retry budget exceeded ({len(failed)}/{cfg['max_attempts']} failed attempts)"
     if timeline:
-        t0 = dt.datetime.fromisoformat(timeline[0]["ts"])
+        # Runtime = the CURRENT work stream, not kata lifetime: the clock
+        # restarts at each revival (intake, QA/CI failure feedback, retry) so
+        # time parked at gate:review / waiting on CI doesn't count.
+        restarts = [e for e in timeline
+                    if e["event"] in ("Intaken", "Retry", "QA Failed", "CI Failed")]
+        t0 = dt.datetime.fromisoformat((restarts[-1] if restarts else timeline[0])["ts"])
         mins = (now() - t0).total_seconds() / 60
         if mins > cfg["max_runtime_min"]:
-            return "HALT", f"Runtime limit exceeded ({mins:.0f}m > {cfg['max_runtime_min']}m)"
+            return "HALT", f"Runtime limit exceeded ({mins:.0f}m > {cfg['max_runtime_min']}m in current attempt)"
     fails = [e for e in timeline if e["event"] == "QA Failed"]
     sigs = [e.get("detail", "") for e in fails]
     if sigs and len(sigs) >= cfg["identical_failures"]:

@@ -12,6 +12,14 @@ FACTORY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 export FACTORY_DIR
 PY="python3 -u $FACTORY_DIR/scripts/factory/factory.py"
 
+# Single-instance guard: two orchestrators would race on katas and the corpus.
+exec 200>"$FACTORY_DIR/.orchestrate.lock"
+if ! flock -n 200; then
+    echo "ERROR: another orchestrator is already running (lock: .orchestrate.lock)"
+    echo "       watch it with: tail -f evidence/factory.log — or kill it first."
+    exit 1
+fi
+
 LIMIT=2 KATAS="" ONCE=0 MAX_CYCLES=0
 while [ $# -gt 0 ]; do
     case "$1" in

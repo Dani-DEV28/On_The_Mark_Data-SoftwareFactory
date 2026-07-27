@@ -694,36 +694,44 @@ def gate_qa(item):
     cmd = impl.get("test_command", "")
     if not isinstance(cmd, str) or not cmd.startswith("uv run pytest"):
         cmd = "uv run pytest tests/ -x -q"
-    # Targeted tests first, then ALWAYS the full suite — full-file replacement
-    # makes regressions elsewhere the primary risk. pytest lives in the
-    # "test" extra, injected after `run`.
-    runs = [cmd]
+    # Targeted tests, the full suite, AND the same static checks CI runs —
+    # otherwise lint/type failures are only discovered after the push.
+    # pytest lives in the "test" extra; mypy in "dev"; ruff via uvx.
+    uvx = os.path.join(os.path.dirname(UV_BIN), "uvx")
+    runs = [(cmd, [UV_BIN, "run", "--extra", "test"] + cmd.split()[2:])]
     if "tests/ " not in cmd + " " and not cmd.rstrip().endswith("tests/"):
-        runs.append("uv run pytest tests/ -q")
+        runs.append(("uv run pytest tests/ -q",
+                     [UV_BIN, "run", "--extra", "test", "pytest", "tests/", "-q"]))
+    runs.append(("ruff check .", [uvx, "ruff@0.15.21", "check", "."]))
+    runs.append(("mypy petri", [UV_BIN, "run", "--extra", "dev", "mypy", "petri"]))
     t0 = time.time()
     out, passed = "", True
     qa_view = AgentView("devops-qa", sid, "testing").start()
     with CORPUS_LOCK:
         corpus_branch(sid)
-        for c in runs:
-            qa_view.note(f"$ {c}")
-            cmd_args = [UV_BIN, "run", "--extra", "test"] + c.split()[2:]
+        for label, cmd_args in runs:
+            qa_view.note(f"$ {label}")
             try:
                 r = subprocess.run(cmd_args, cwd=CORPUS, capture_output=True, text=True, timeout=900)
-                out += f"\n$ {c}\n" + (r.stdout + "\n" + r.stderr)[-5000:]
+                out += f"\n$ {label}\n" + (r.stdout + "\n" + r.stderr)[-5000:]
                 if r.returncode != 0:
                     passed = False
                     break
             except subprocess.TimeoutExpired:
-                out, passed = out + f"\n$ {c}\nTIMEOUT after 900s", False
+                out, passed = out + f"\n$ {label}\nTIMEOUT after 900s", False
                 break
-    out = out[-6000:]
-    qa_view.done("tests green ✓" if passed else "tests FAILED ✗")
+            except FileNotFoundError as e:
+                out += f"\n$ {label}\nSKIPPED (tool missing: {e})"
+    out = out[-7000:]
+    qa_view.done("tests+lint green ✓" if passed else "checks FAILED ✗")
+    cmd = " && ".join(l for l, _ in runs)
     cmd = " && ".join(runs)
     failures = re.findall(r"^(FAILED|ERROR) (\S+)", out, re.MULTILINE)
+    failures += [("LINT", m) for m in re.findall(r"^(\S+\.py:\d+:\d+: \S+ .{0,80})", out, re.MULTILINE)][:10]
+    failures += [("TYPE", m) for m in re.findall(r"^(\S+\.py:\d+: error: .{0,80})", out, re.MULTILINE)][:10]
     sig = hashlib.sha256("|".join(sorted(f"{a} {b}" for a, b in failures)).encode()).hexdigest()[:12]
     art = {"commands": [cmd], "passed": passed, "seconds": round(time.time() - t0, 1),
-           "failures": [f"{a} {b}" for a, b in failures][:20], "signature": sig,
+           "failures": [f"{a} {b}" for a, b in failures][:25], "signature": sig,
            "output_tail": out[-2500:]}
     save_artifact(sid, f"qa-{int(time.time())}", art, "devops-qa")
     if passed:
@@ -860,10 +868,18 @@ def gate_ci(item):
                      f"PR READY for human review: {pr['html_url']}", "devops-qa")
         log(f"  {sid}: CI GREEN ({len(runs)} checks) -> review  {pr['html_url']}")
         return
+    def _annotations(run):
+        try:
+            ann = _gh_api(f"/repos/{slug}/check-runs/{run['id']}/annotations")
+            return [f"{a.get('path')}:{a.get('start_line')} {a.get('annotation_level')}: "
+                    f"{(a.get('message') or '')[:200]}" for a in ann[:10]]
+        except Exception:  # noqa: BLE001
+            return []
     art = {"pr": pr["number"], "pr_url": pr["html_url"], "sha": pr_sha,
            "failed_checks": [{"name": r["name"],
                               "summary": ((r.get("output") or {}).get("summary") or
                                           (r.get("output") or {}).get("title") or "")[:500],
+                              "annotations": _annotations(r),
                               "url": r.get("html_url")} for r in failed]}
     save_artifact(sid, f"ci-{int(time.time())}", art, "devops-qa")
     record_event(sid, "CI Failed", ",".join(r["name"] for r in failed)[:100])
@@ -1008,6 +1024,8 @@ def cmd_heartbeat(_args):
     counters = state.get("counters", {})
     snapshot = {}
     for lbl in ALL_GATE_LABELS[:-2]:
+        if lbl == "gate:ci":
+            continue  # waiting on external CI / push relay is not a stall
         for it in kata_list(label=lbl):
             snapshot[it["short_id"]] = f"{lbl}@{it.get('updated_at', '')}"
     for sid, sig in snapshot.items():

@@ -1,0 +1,78 @@
+design_notes: '## Overview
+
+  Implement edge intelligence reporting by introducing new API endpoints (`/api/edges`, `/api/intelligence`)
+  and updating CLI commands (`check`, `graph`) and Dashboard UI. The core architectural constraint is
+  to avoid per-request deserialization of colonies by leveraging the existing `petri/query/` layer for
+  optimized reads. The design focuses on data consistency between CLI and Dashboard by sharing the same
+  query logic and intelligence calculation logic.
+
+
+  ## File Changes
+
+  - `petri/query/`: Create/Modify query functions to fetch edge data and intelligence metrics without
+  deserializing colonies.
+
+  - `petri/dashboard/api.py`: Add `GET /api/edges` and `GET /api/intelligence` endpoints. Use query layer.
+  Add OTel spans.
+
+  - `petri/cli/check.py`: Add validation-targets section. Use query layer.
+
+  - `petri/cli/graph.py`: Add convergence point annotations and cross-colony edge styling in DOT output.
+
+  - `petri/cli_ui.py`: Update UI rendering for new CLI output.
+
+  - `petri/dashboard/frontend.py`: Replace hardcoded constants with dynamic edge type styling.
+
+  - `petri/templates/frontend.html`: Add validation-targets panel and cross-colony edge styling.
+
+  - `petri/analysis/edge_intelligence.py`: Ensure `EdgeIntelligenceReport` schema is defined and used.
+
+  - `petri/storage/edge_registry.py`: Ensure edge registry is accessible for reads.
+
+  - `tests/unit/test_api_edges.py`: Create tests for new endpoints.
+
+
+  ## Interfaces
+
+  - `GET /api/edges` -> Returns list of edges with `edge_type`.
+
+  - `GET /api/intelligence` -> Returns `EdgeIntelligenceReport` JSON.
+
+  - CLI `check` -> Prints validation targets.
+
+  - CLI `graph` -> Outputs DOT with annotations.
+
+
+  ## Patterns
+
+  - Use `petri/query/` for all data reads.
+
+  - OTel span attributes for API endpoints.
+
+  - Shared query logic for CLI and API to ensure consistency.
+
+  - Dynamic styling in frontend based on edge type.
+
+
+  ## Risks
+
+  - **Performance:** Query layer must be optimized to avoid N+1 queries or heavy joins that could impact
+  API response times.
+
+  - **Data Consistency:** CLI and Dashboard must use identical logic for calculating convergence points
+  and importance/fragility to avoid discrepancies.
+
+  - **Complexity:** Managing edge types and styling in the frontend requires careful handling of unknown
+  types.
+
+  - **Testing:** Mocking the query layer for CLI tests might be complex.
+
+  '
+risks:
+- 'Performance: Query layer must be optimized to avoid N+1 queries or heavy joins that could impact API
+  response times.'
+- 'Data Consistency: CLI and Dashboard must use identical logic for calculating convergence points and
+  importance/fragility to avoid discrepancies.'
+- 'Complexity: Managing edge types and styling in the frontend requires careful handling of unknown types.'
+- 'Testing: Mocking the query layer for CLI tests might be complex.'
+approved: true

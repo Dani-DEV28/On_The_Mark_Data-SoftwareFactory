@@ -1,26 +1,33 @@
 acceptance_criteria:
-- petri --version prints the version string (e.g., 'petri 0.3.7') and exits with code 0.
-- The printed version matches petri.__version__ (resolved via importlib.metadata.version('petri-grow')).
-- The flag works eagerly without requiring a valid .petri/ project directory or subcommand.
-- An integration test exists in tests/integration/test_cli.py using Typer's CliRunner that asserts the
-  output contains the version string.
-- Implementation uses @app.callback() with is_eager=True and raises typer.Exit() after printing.
+- petri --version prints output in format 'petri <version>' and exits with code 0
+- Printed version matches petri.__version__ (resolved from package metadata)
+- Flag works when executed from any directory without a .petri/ project
+- Test uses Typer CliRunner, asserts output contains version string, and runs fully offline
+- No regressions in existing CLI integration tests
+- Implementation uses the specified Typer pattern (@app.callback with is_eager=True and typer.Exit)
 edge_cases:
-- Running petri --version alongside other flags or subcommands should still print the version and exit
-  immediately, ignoring all other arguments.
-- If petri-grow metadata is unavailable or malformed (e.g., during local dev installs), the callback should
-  fail gracefully or print a fallback without crashing the CLI.
-- Version strings containing non-standard characters or dev markers (e.g., 0.0.0.dev1) should print exactly
-  as resolved without breaking output formatting.
+- Running --version alongside other flags (e.g., --version --help) should still print version and exit
+- Running --version with a subcommand (e.g., petri --version init) should print version and exit without
+  running the subcommand
+- Handling cases where package metadata is unavailable (should fail gracefully or raise a clear error,
+  though setuptools-scm typically guarantees availability)
 subtasks:
-- Implement eager --version callback in petri/cli/__init__.py using @app.callback() and typer.Option with
-  is_eager=True.
-- Add integration test in tests/integration/test_cli.py using CliRunner to verify output matches petri.__version__
-  and exit code is 0.
-- 'Run local verification: execute petri --version and compare output with importlib.metadata.version(''petri-grow'').'
-- Execute full offline test suite to confirm no regressions in existing CLI commands or project initialization
-  logic.
-definition_of_done: Code changes are committed to petri/cli/__init__.py and tests/integration/test_cli.py.
-  The petri --version command prints the correct version and exits with code 0. The new integration test
-  passes locally and in CI. No regressions exist in existing CLI functionality or project initialization.
-  All acceptance criteria are met.
+- order: 1
+  title: Implement eager --version flag in petri CLI
+  depends_on: none
+  acceptance_criteria:
+  - Add @app.callback() with --version option using is_eager=True and typer.Exit()
+  - Import petri.__version__ lazily inside the callback to avoid import-time side effects
+  - typer.echo outputs 'petri {__version__}' and raises typer.Exit() when flag is triggered
+  - No changes to existing subcommand logic or dependency injection
+- order: 2
+  title: Add integration test for --version flag
+  depends_on: subtask-1
+  acceptance_criteria:
+  - Test in tests/integration/test_cli.py uses CliRunner to invoke petri --version
+  - Asserts exit code is 0 and output contains the expected version string
+  - Test runs offline (no network/provider calls) and mocks remain intact
+  - Test passes in isolation and alongside existing CLI tests
+definition_of_done: CLI implementation merged, integration test passes locally and in CI, --version outputs
+  correct metadata version and exits 0, works offline from any directory, and no regressions exist in
+  the test suite.

@@ -1,7 +1,11 @@
-analysis: The CLI currently lacks a `--version` flag, preventing users from quickly verifying their installed
-  version. The version string is already exposed via `petri.__version__` (backed by setuptools-scm). We
-  need to wire this into the Typer app using an eager callback so it intercepts before any subcommand
-  parsing or project initialization. This is a straightforward CLI enhancement with no architectural impact.
+analysis: 'The issue is a straightforward CLI enhancement: wire `--version` into the Typer app.
+
+  `petri.__version__` already resolves from package metadata. We just need to add an eager `--version`
+  option to the main callback in `petri/cli/__init__.py` and add a corresponding test in `tests/integration/test_cli.py`.
+
+  No architectural changes, no new modules, no DB/API changes. Purely additive CLI wiring.
+
+  '
 type: feature
 needs_architect: false
 affected_files:
@@ -9,11 +13,11 @@ affected_files:
 - tests/integration/test_cli.py
 task:
   title: Wire `petri --version` into the CLI
-  objective: Add a top-level `--version` flag to the Typer app that prints the version string and exits
-    immediately, with a corresponding integration test.
+  objective: Add an eager `--version` flag to the Typer app that prints `petri <version>` and exits 0,
+    plus a test covering it.
   constraints:
-  - Use `@app.callback()` with a `--version` option (`is_eager=True`, `callback=...`).
-  - Callback must import `petri.__version__` lazily, print `f'petri {__version__}'`, and raise `typer.Exit()`.
-  - Test in `tests/integration/test_cli.py` using Typer's `CliRunner`; assert output contains the version
-    string.
-  - Keep it offline; no network or project directory required.
+  - Use the exact Typer pattern from the issue body (`@app.callback()` with `is_eager=True` and `typer.Exit()`)
+  - Import `petri.__version__` lazily inside the callback to avoid import-time side effects
+  - Test must use `CliRunner`, assert output contains the version string, and run offline (no network/provider
+    calls)
+  - Keep changes minimal; do not add per-subcommand version flags or a `version` subcommand

@@ -20,7 +20,7 @@ if ! flock -n 200; then
     exit 1
 fi
 
-LIMIT=2 KATAS="" ONCE=0 MAX_CYCLES=0
+LIMIT=1 KATAS="" ONCE=0 MAX_CYCLES=0   # focus mode: whole team on ONE kata at a time
 while [ $# -gt 0 ]; do
     case "$1" in
         --limit) LIMIT="$2"; shift 2 ;;
@@ -34,22 +34,51 @@ done
 RUN_START=$(date +%s)
 echo "╔══════════════════════════════════════════════════════════════"
 echo "║ SOFTWARE FACTORY — orchestrator starting $(date '+%Y-%m-%d %H:%M:%S')"
-echo "║ katas: ${KATAS:-auto-intake}   parallel limit: $LIMIT   model: ${SFAI_MODEL:-qwen3.6-35b-a3b-fp8}"
-echo "║ gates: intake→scoped→designed→implement→qa→(tl-review)→docs→review"
+echo "║ mode: FOCUS (all agents on one kata) — katas: ${KATAS:-auto from backlog}"
+echo "║ model: ${SFAI_MODEL:-qwen3.6-35b-a3b-fp8}"
+echo "║ gates: intake→scoped→designed→implement→qa→(tl-review)→docs→ci→review"
 echo "║ persistent log: evidence/factory.log   TPM config: config/stop-gap.yaml"
 echo "╚══════════════════════════════════════════════════════════════"
-$PY intake ${KATAS:+--katas "$KATAS"} --limit "$LIMIT"
+[ -n "$KATAS" ] && $PY intake --katas "$KATAS" --limit "$LIMIT"
+
+# First kata currently sitting in a working gate (in-flight work resumes first)
+pick_focus() {
+    $PY status 2>/dev/null \
+        | grep -E "gate:(intaken|scoped|designed|implementing|qa|tl-review|documenting|ci) " \
+        | head -1 | awk "{print \$3}" | tr -d ","
+}
 
 cycle=0
 stopcheck_errs=0
 while true; do
     cycle=$((cycle + 1))
     CYCLE_START=$(date +%s)
+
+    # FOCUS: exactly one kata gets the whole team. Explicit --katas wins;
+    # otherwise resume in-flight work; otherwise intake the next from backlog.
+    FOCUS="$KATAS"
+    if [ -z "$FOCUS" ]; then
+        FOCUS=$(pick_focus)
+        if [ -z "$FOCUS" ]; then
+            intake_out=$($PY intake --limit 1)
+            echo "$intake_out"
+            newly=$(echo "$intake_out" | grep -oE "intaken: [0-9]+" | grep -oE "[0-9]+" || echo 0)
+            if [ "${newly:-0}" -eq 0 ]; then
+                echo ""
+                echo "╔══════════════════════════════════════════════════════════════"
+                echo "║ BACKLOG DRAINED — nothing left to intake — $(( $(date +%s) - RUN_START ))s total"
+                echo "║ review the work:   kata list --label gate:review"
+                echo "╚══════════════════════════════════════════════════════════════"
+                break
+            fi
+            FOCUS=$(pick_focus)
+        fi
+    fi
     echo ""
-    echo "━━━ cycle $cycle — $(date '+%H:%M:%S') ━━━"
-    # Two concurrent lanes: heavy (implement/qa/docs/ci, corpus-locked) and
-    # light (intake/scoped/designed/tl-review). vLLM batches their requests.
-    $PY cycle --limit "$LIMIT" ${KATAS:+--katas "$KATAS"}
+    echo "━━━ cycle $cycle — $(date '+%H:%M:%S') — FOCUS: $FOCUS ━━━"
+    # Two concurrent lanes still run (planning + heavy), but both serve the
+    # focus kata only; vLLM batches whatever overlaps.
+    $PY cycle --limit "$LIMIT" --katas "$FOCUS"
     # Exit codes: 0=PASS, 2=per-kata HALT (quarantined at gate:halted,
     # incident report written — factory continues), 3=manual [stop] kata
     # (whole-factory stop), 1=stop-check itself failed.
@@ -75,17 +104,20 @@ while true; do
     $PY status
     echo "━━━ cycle $cycle done in $(( $(date +%s) - CYCLE_START ))s (run total $(( $(date +%s) - RUN_START ))s) ━━━"
 
-    # Done when nothing is active in the working gates
-    active=$($PY status | grep -cE "gate:(intaken|scoped|designed|implementing|qa|tl-review|documenting|ci) " || true)
-    if [ "$active" -eq 0 ]; then
-        echo ""
-        echo "╔══════════════════════════════════════════════════════════════"
-        echo "║ ALL KATAS at gate:review, gate:halted, or done — $(( $(date +%s) - RUN_START ))s total"
-        echo "║ review the work:   kata list --label gate:review"
-        echo "║ inspect a fix:     cd corpus && git diff main...factory/<kata>"
-        echo "║ incidents (if any): ls evidence/incidents/"
-        echo "╚══════════════════════════════════════════════════════════════"
-        break
+    # Explicit --katas mode: done when the requested katas leave the pipeline.
+    # (Auto mode terminates via BACKLOG DRAINED at the top of the loop.)
+    if [ -n "$KATAS" ]; then
+        active=$($PY status | grep -cE "gate:(intaken|scoped|designed|implementing|qa|tl-review|documenting|ci) " || true)
+        if [ "$active" -eq 0 ]; then
+            echo ""
+            echo "╔══════════════════════════════════════════════════════════════"
+            echo "║ REQUESTED KATAS at gate:review, gate:halted, or done — $(( $(date +%s) - RUN_START ))s total"
+            echo "║ review the work:   kata list --label gate:review"
+            echo "║ inspect a fix:     cd corpus && git diff main...factory/<kata>"
+            echo "║ incidents (if any): ls evidence/incidents/"
+            echo "╚══════════════════════════════════════════════════════════════"
+            break
+        fi
     fi
     [ "$ONCE" -eq 1 ] && break
     [ "$MAX_CYCLES" -gt 0 ] && [ "$cycle" -ge "$MAX_CYCLES" ] && { echo "cycle limit reached"; break; }

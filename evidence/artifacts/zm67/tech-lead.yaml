@@ -1,0 +1,25 @@
+analysis: 'Feature: Surface edge intelligence in CLI and dashboard. Scope includes CLI updates (check/graph),
+  new API endpoints (/api/edges, /api/intelligence), and Dashboard UI changes. Critical constraint: avoid
+  per-request deserialize_colony; use petri/query/ for reads. Architect needed to design read path and
+  API contracts.'
+type: feature
+needs_architect: true
+affected_files:
+- petri/cli/check.py
+- petri/cli/graph.py
+- petri/cli_ui.py
+- petri/dashboard/api.py
+- petri/dashboard/frontend.py
+- petri/templates/frontend.html
+- petri/query/
+- petri/storage/edge_registry.py
+- petri/analysis/edge_intelligence.py
+- tests/unit/test_api_edges.py
+task:
+  title: Surface edge intelligence in CLI and dashboard
+  objective: Implement edge intelligence reporting in CLI and Dashboard API/Frontend.
+  constraints:
+  - No per-request deserialize_colony calls
+  - Use petri/query/ for reads
+  - OTel span attributes for new endpoints
+  - String-level assertions for CLI output

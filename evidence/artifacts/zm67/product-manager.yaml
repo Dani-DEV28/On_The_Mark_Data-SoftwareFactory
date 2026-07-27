@@ -1,0 +1,59 @@
+acceptance_criteria:
+- CLI petri check prints validation-targets section with convergence points, importance, and fragility
+  values (default N=5)
+- CLI petri graph marks convergence points and styles cross-colony edges distinctly in text and DOT output
+- GET /api/edges returns all registry edges with edge_type field
+- GET /api/intelligence returns schema-valid EdgeIntelligenceReport JSON
+- Neither endpoint deserializes colonies per request; no new deserialize_colony call sites in api.py
+- New reads use petri/query/ layer exclusively
+- Both endpoints emit OTel span attributes per D7/M5 conventions
+- Dashboard renders cross-colony edges visually distinct by type
+- Dashboard shows validation-targets panel
+- CLI and dashboard agree on top-N convergence points for a fixture dish
+- Unit tests for API endpoints pass with FastAPI TestClient
+- Manual verification checklist documented and executed against fixture dish
+edge_cases:
+- 'Empty registry: endpoints return empty lists/objects without errors; UI shows graceful fallback'
+- 'Unknown edge type: falls back to default styling, logs warning, does not crash'
+- 'Zero importance/fragility: displays 0.0 or N/A, handles division-by-zero in calculations'
+- 'High N value in CLI: truncates to available data, prints warning, does not hang'
+- 'Malformed intelligence JSON: dashboard catches parse error, shows error state, does not break layout'
+subtasks:
+- order: 1
+  title: Implement /api/edges and /api/intelligence endpoints with optimized read path
+  depends_on: none
+  acceptance_criteria:
+  - GET /api/edges returns all registry edges with edge_type
+  - GET /api/intelligence returns schema-valid EdgeIntelligenceReport
+  - No deserialize_colony calls in api.py for these endpoints
+  - Reads routed through petri/query/
+  - OTel span attributes emitted per D7/M5
+- order: 2
+  title: Update CLI check and graph commands for edge intelligence
+  depends_on: kata-1
+  acceptance_criteria:
+  - petri check prints validation-targets section (default N=5)
+  - petri graph marks convergence points and styles cross-colony edges in DOT/text
+  - String-level assertions pass for CLI output
+  - CLI uses same query layer as API for data consistency
+- order: 3
+  title: Update Dashboard UI for cross-colony edges and validation targets
+  depends_on: kata-1
+  acceptance_criteria:
+  - Dashboard renders cross-colony edges visually distinct by type
+  - Dashboard shows validation-targets panel
+  - Frontend constants replaced with dynamic values
+  - Dashboard agrees with CLI on top-N convergence points for fixture dish
+- order: 4
+  title: Add API unit tests and manual verification checklist
+  depends_on: kata-1, kata-2, kata-3
+  acceptance_criteria:
+  - tests/unit/test_api_edges.py passes with FastAPI TestClient
+  - No LLM or live grow calls in tests
+  - Manual verification checklist documented in PR
+  - Checklist executed against fixture dish with documented results
+definition_of_done: All 4 katas merged to main, CI green, API endpoints tested via TestClient, CLI output
+  verified via string assertions, dashboard UI validated against fixture dish, OTel spans confirmed in
+  tracing backend, and manual verification checklist signed off. No per-request deserialize_colony calls
+  remain in api.py. Scope is tight to MVP; queue prioritization and golden-angle layout deferred to follow-on
+  issues.

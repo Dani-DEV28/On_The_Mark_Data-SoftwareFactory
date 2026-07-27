@@ -4,3 +4,5 @@
 {"ts": "2026-07-26T23:43:06.694802+00:00", "event": "architect Failed", "detail": "architect produced invalid artifact: mapping values are not allowed here\n  in \"<unicode string>\", line 51, column 50:\n     ... : Correctly handling `stopReason: error` channel.\n                                         ^"}
 {"ts": "2026-07-26T23:52:18.951106+00:00", "event": "Architecture Complete", "detail": ""}
 {"ts": "2026-07-26T23:58:03.374104+00:00", "event": "Implementation Attempt 1", "detail": "09b26d6 files=['petri/errors.py', 'petri/adapters/pi_transport.py', 'petri/adapters/pi_model.py', 'petri/engine/harness.py', 'petri/engine/bridge.py', 'tests/fake_pi.py', 'tests/test_pi_transport.py', 'tests/test_pi_model.py', 'tests/test_harness.py']"}
+{"ts": "2026-07-27T00:00:47.333920+00:00", "event": "QA Failed", "detail": "88743df9120a"}
+{"ts": "2026-07-27T00:01:27.356414+00:00", "event": "Retry", "detail": ""}

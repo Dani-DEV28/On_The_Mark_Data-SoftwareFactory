@@ -65,10 +65,12 @@ GATE_ROLE = {
     "qa": ("gate:qa", "devops-qa"),
     "tl-review": ("gate:tl-review", "tech-lead"),
     "docs": ("gate:documenting", "docs-engineer"),
+    "ci": ("gate:ci", "devops-qa"),
 }
 ALL_GATE_LABELS = [
     "gate:intaken", "gate:scoped", "gate:designed", "gate:implementing",
-    "gate:qa", "gate:tl-review", "gate:documenting", "gate:review", "gate:halted",
+    "gate:qa", "gate:tl-review", "gate:documenting", "gate:ci",
+    "gate:review", "gate:halted",
 ]
 
 
@@ -90,7 +92,7 @@ def file_log(line):
 
 def log(msg):
     line = f"[{now().strftime('%H:%M:%S')}] {msg}"
-    print(line, flush=True)
+    _panel_interrupt(line)
     file_log(line)
 
 
@@ -125,14 +127,66 @@ def _save_team_state(state):
         pass
 
 
+# ---- shared panel state: several agents can be active concurrently ----
+_PANEL = threading.RLock()
+_ACTIVE = {}        # role -> AgentView
+_DRAWN = [0]        # lines currently drawn on screen
+_FRAME_I = [0]
+
+
+def _panel_lines():
+    _FRAME_I[0] += 1
+    frame = AgentView.FRAMES[_FRAME_I[0] % len(AgentView.FRAMES)]
+    lanes = f"{len(_ACTIVE)} agent(s) active — heavy + light lanes, batched on one local model"
+    hdr = f"\x1b[1m── factory team ──\x1b[0m {now().strftime('%H:%M:%S')} ({lanes})"
+    any_view = next(iter(_ACTIVE.values()), None)
+    lines = [hdr]
+    for role in TEAM:
+        v = _ACTIVE.get(role)
+        if v is not None:
+            lines.append(v.active_row(frame))
+        elif any_view is not None:
+            lines.append(any_view.idle_row(role))
+    return lines
+
+
+def _panel_draw():
+    with _PANEL:
+        if not IS_TTY:
+            return
+        lines = _panel_lines()
+        out = (f"\x1b[{_DRAWN[0]}F" if _DRAWN[0] else "")
+        out += "".join("\x1b[K" + l[:180] + "\n" for l in lines)
+        sys.stdout.write(out)
+        sys.stdout.flush()
+        _DRAWN[0] = len(lines)
+
+
+def _panel_interrupt(line):
+    """Print a plain line without corrupting the panel region."""
+    with _PANEL:
+        if IS_TTY and _DRAWN[0]:
+            sys.stdout.write(f"\x1b[{_DRAWN[0]}F\x1b[0J")
+            _DRAWN[0] = 0
+        print(line, flush=True)
+
+
+def _panel_loop():
+    while True:
+        with _PANEL:
+            if not _ACTIVE:
+                break
+        _panel_draw()
+        time.sleep(0.15)
+
+
 class AgentView:
-    """Full-team terminal panel: all 7 roles are always visible; the active
-    one animates with a live token stream, the rest show their last completed
-    work (persisted across processes via evidence/team-state.json).
-    Falls back to plain log lines when stdout is not a TTY (nohup / logs)."""
+    """Full-team terminal panel: all 7 roles are always visible; active ones
+    (possibly several — heavy + light lanes) animate with live token streams,
+    the rest show queue depth and last completed work (persisted via
+    evidence/team-state.json). Plain log lines when stdout is not a TTY."""
 
     FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-    HEIGHT = len(TEAM) + 1  # header + one row per role
 
     def __init__(self, role, kata_id, verb="working"):
         self.role, self.kata, self.verb = role, kata_id, verb
@@ -163,10 +217,12 @@ class AgentView:
                 pass
 
     def start(self):
-        if IS_TTY:
-            self._thread = threading.Thread(target=self._spin, daemon=True)
-            self._thread.start()
-        else:
+        with _PANEL:
+            _ACTIVE[self.role] = self
+            need_loop = IS_TTY and len(_ACTIVE) == 1
+        if need_loop:
+            threading.Thread(target=_panel_loop, daemon=True).start()
+        if not IS_TTY:
             log(f"{ROLE_ICON.get(self.role, '•')} {self.role} {self.verb} on {self.kata}...")
         return self
 
@@ -175,23 +231,21 @@ class AgentView:
             self.tok += 1
             self.tail = (self.tail + delta).replace("\n", "⏎ ")[-46:]
 
-    def note(self, text):
+    def active_row(self, frame):
+        icon = ROLE_ICON.get(self.role, "•")
+        el = time.time() - self.t0
+        rate = self.tok / el if el > 0.5 else 0
         with self._lock:
-            self.tail = text[-46:]
+            tail = self.tail
+        return (f"{frame} {icon} \x1b[1m{self.role:<16}\x1b[0m {self.verb} on "
+                f"\x1b[1m{self.kata}\x1b[0m  {self.tok:>5} tok {rate:5.1f} tok/s "
+                f"{el:4.0f}s \x1b[2m{tail}\x1b[0m")
 
-    def _row(self, role, frame):
+    def idle_row(self, role):
         icon = ROLE_ICON.get(role, "•")
-        if role == self.role:
-            el = time.time() - self.t0
-            rate = self.tok / el if el > 0.5 else 0
-            with self._lock:
-                tail = self.tail
-            return (f"{frame} {icon} \x1b[1m{role:<16}\x1b[0m {self.verb} on "
-                    f"\x1b[1m{self.kata}\x1b[0m  {self.tok:>5} tok {rate:5.1f} tok/s "
-                    f"{el:4.0f}s \x1b[2m{tail}\x1b[0m")
         q = self.queue.get(role)
         if role == "tpm":
-            queue_s = "watching (stop-check every gate)"
+            queue_s = "watching (stop-check every cycle)"
         elif q is None:
             queue_s = ""
         elif q == 0:
@@ -206,36 +260,22 @@ class AgentView:
                     f"last ✓ {info.get('msg', '')[:44]} ({age_s})\x1b[0m")
         return f"  {icon} \x1b[2m{role:<16} idle · {queue_s}\x1b[0m"
 
-    def _render(self, frame):
-        hdr = (f"\x1b[1m── factory team ──\x1b[0m {now().strftime('%H:%M:%S')} "
-               f"(one agent runs at a time — single local model)")
-        lines = [hdr] + [self._row(r, frame) for r in TEAM]
-        out = (f"\x1b[{self.HEIGHT}F" if self._drawn else "")
-        out += "".join("\x1b[K" + l[:180] + "\n" for l in lines)
-        sys.stdout.write(out)
-        sys.stdout.flush()
-        self._drawn = True
-
-    def _spin(self):
-        while not self._stop.is_set():
-            f = self.FRAMES[self._i % len(self.FRAMES)]
-            self._i += 1
-            self._render(f)
-            time.sleep(0.15)
+    def note(self, text):
+        with self._lock:
+            self.tail = text[-46:]
 
     def done(self, msg=""):
-        self._stop.set()
-        if self._thread:
-            self._thread.join(timeout=0.6)
         el = time.time() - self.t0
         summary = f"{self.kata}: {msg}  {self.tok} tok {el:.0f}s"
-        self.last[self.role] = {"msg": summary, "ts": time.time()}
-        _save_team_state(self.last)
-        if IS_TTY:
-            self._render("✓")
+        with _PANEL:
+            self.last[self.role] = {"msg": summary, "ts": time.time()}
+            _save_team_state(self.last)
+            _ACTIVE.pop(self.role, None)
         icon = ROLE_ICON.get(self.role, "•")
         line = f"✓ {icon} {self.role:<16} {self.kata}  {self.tok} tok  {el:.0f}s  {msg}"
-        if not IS_TTY:
+        if IS_TTY:
+            _panel_interrupt(line)
+        else:
             print(line, flush=True)
         file_log(f"[{now().strftime('%H:%M:%S')}] {line}")
 
@@ -430,6 +470,10 @@ def soul(role):
 
 # ---------- corpus git ----------
 
+# One shared working tree: any checkout/read/write sequence must hold this.
+CORPUS_LOCK = threading.RLock()
+
+
 def corpus_git(*args, check=True):
     r = subprocess.run(
         ["git", "-c", "user.name=Software Factory", "-c", "user.email=factory@onthemark.local",
@@ -508,6 +552,11 @@ def repo_tree(limit=150):
     return "\n".join(lines[:limit]) + (f"\n...({len(lines)} files total)" if len(lines) > limit else "")
 
 
+def _locked_repo_tree(limit=150):
+    with CORPUS_LOCK:
+        return repo_tree(limit)
+
+
 # ---------- context assembly ----------
 
 def kata_context(item, include_artifacts=("tech-lead", "product-manager", "architect", "tl-review")):
@@ -541,7 +590,7 @@ def gate_intake(item):
         "affected_files (list of repo-relative paths or dirs), "
         "task (mapping: title, objective, constraints (list)).",
         kata_context(item, include_artifacts=()) +
-        "\n\nREPO FILE TREE (corpus):\n" + repo_tree(),
+        "\n\nREPO FILE TREE (corpus):\n" + _locked_repo_tree(),
         sid, ["analysis", "type", "needs_architect", "affected_files", "task"])
     save_artifact(sid, "tech-lead", art, "tech-lead")
     record_event(sid, "Analysis Complete")
@@ -603,11 +652,13 @@ def gate_implement(item):
     avail = max(8000, (30000 - 16384) * 3 - len(system) - len(base))
     per_file = max(2000, min(12000, avail // max(1, len(affected))))
     parts, truncated = [], set()
-    for p in affected:
-        snip = file_snippet(p, per_file)
-        if snip.endswith("[truncated]"):
-            truncated.add(os.path.normpath(p))
-        parts.append(f"=== {p} ===\n{snip}")
+    with CORPUS_LOCK:
+        corpus_branch(sid)  # read context from THIS kata's branch (matters on retries)
+        for p in affected:
+            snip = file_snippet(p, per_file)
+            if snip.endswith("[truncated]"):
+                truncated.add(os.path.normpath(p))
+            parts.append(f"=== {p} ===\n{snip}")
     snippets = "\n\n".join(parts)
     if truncated:
         snippets += ("\n\nWARNING: files marked ...[truncated] are INCOMPLETE. You MUST NOT "
@@ -625,9 +676,10 @@ def gate_implement(item):
                and os.path.normpath(str(f.get("path", ""))) in truncated]
         if bad:
             raise RuntimeError(f"implementer tried to overwrite truncated files {bad}")
-    branch = corpus_branch(sid)
-    written, sha = apply_files(sid, art["files"],
-                               f"factory({sid}) attempt {attempts + 1}: {item['title'][:60]}")
+    with CORPUS_LOCK:
+        branch = corpus_branch(sid)
+        written, sha = apply_files(sid, art["files"],
+                                   f"factory({sid}) attempt {attempts + 1}: {item['title'][:60]}")
     art["_commit"] = sha
     art["_branch"] = branch
     save_artifact(sid, "implementer", art, "implementer")
@@ -639,7 +691,6 @@ def gate_implement(item):
 def gate_qa(item):
     sid = item["short_id"]
     impl = load_artifact(sid, "implementer") or {}
-    corpus_branch(sid)
     cmd = impl.get("test_command", "")
     if not isinstance(cmd, str) or not cmd.startswith("uv run pytest"):
         cmd = "uv run pytest tests/ -x -q"
@@ -652,18 +703,20 @@ def gate_qa(item):
     t0 = time.time()
     out, passed = "", True
     qa_view = AgentView("devops-qa", sid, "testing").start()
-    for c in runs:
-        qa_view.note(f"$ {c}")
-        cmd_args = [UV_BIN, "run", "--extra", "test"] + c.split()[2:]
-        try:
-            r = subprocess.run(cmd_args, cwd=CORPUS, capture_output=True, text=True, timeout=900)
-            out += f"\n$ {c}\n" + (r.stdout + "\n" + r.stderr)[-5000:]
-            if r.returncode != 0:
-                passed = False
+    with CORPUS_LOCK:
+        corpus_branch(sid)
+        for c in runs:
+            qa_view.note(f"$ {c}")
+            cmd_args = [UV_BIN, "run", "--extra", "test"] + c.split()[2:]
+            try:
+                r = subprocess.run(cmd_args, cwd=CORPUS, capture_output=True, text=True, timeout=900)
+                out += f"\n$ {c}\n" + (r.stdout + "\n" + r.stderr)[-5000:]
+                if r.returncode != 0:
+                    passed = False
+                    break
+            except subprocess.TimeoutExpired:
+                out, passed = out + f"\n$ {c}\nTIMEOUT after 900s", False
                 break
-        except subprocess.TimeoutExpired:
-            out, passed = out + f"\n$ {c}\nTIMEOUT after 900s", False
-            break
     out = out[-6000:]
     qa_view.done("tests green ✓" if passed else "tests FAILED ✗")
     cmd = " && ".join(runs)
@@ -687,14 +740,21 @@ def gate_tl_review(item):
     sid = item["short_id"]
     qa_arts = sorted(f for f in os.listdir(art_dir(sid)) if f.startswith("qa-"))
     last_qa = load_artifact(sid, qa_arts[-1][:-5]) if qa_arts else {}
+    ci_arts = sorted(f for f in os.listdir(art_dir(sid)) if f.startswith("ci-"))
+    last_ci = load_artifact(sid, ci_arts[-1][:-5]) if ci_arts else {}
+    failure_ctx = ""
+    if last_qa:
+        failure_ctx += "\n\nQA FAILURE ARTIFACT:\n" + yaml.safe_dump(last_qa, sort_keys=False)[:3000]
+    if last_ci:
+        failure_ctx += "\n\nCI FAILURE ARTIFACT (from the GitHub PR checks):\n" + \
+            yaml.safe_dump(last_ci, sort_keys=False)[:3000]
     art = agent_yaml(
         "tech-lead",
         soul("tech-lead") + "\n\n" + PROTOCOL +
-        "\nQA failed. Diagnose and produce a REVISED task artifact with keys: "
+        "\nQA or CI failed. Diagnose and produce a REVISED task artifact with keys: "
         "diagnosis (str), revised_task (mapping: objective, constraints), guidance (str — "
         "specific instructions for the implementer to fix the failure).",
-        kata_context(item) + "\n\nQA FAILURE ARTIFACT:\n" +
-        yaml.safe_dump(last_qa, sort_keys=False)[:4000],
+        kata_context(item) + failure_ctx,
         sid, ["diagnosis", "revised_task", "guidance"])
     save_artifact(sid, "tl-review", art, "tech-lead")
     record_event(sid, "Retry")
@@ -705,7 +765,9 @@ def gate_tl_review(item):
 def gate_docs(item):
     sid = item["short_id"]
     impl = load_artifact(sid, "implementer") or {}
-    changelog = file_snippet("CHANGELOG.md", 2000)
+    with CORPUS_LOCK:
+        corpus_branch(sid)
+        changelog = file_snippet("CHANGELOG.md", 2000)
     changelog_truncated = changelog.endswith("[truncated]")
     art = agent_yaml(
         "docs-engineer",
@@ -721,25 +783,98 @@ def gate_docs(item):
     if changelog_truncated and isinstance(art.get("files"), list):
         art["files"] = [f for f in art["files"] if isinstance(f, dict)
                         and os.path.normpath(str(f.get("path", ""))) != "CHANGELOG.md"]
-    corpus_branch(sid)
-    try:
-        written, sha = apply_files(sid, art.get("files", []), f"factory({sid}) docs")
-    except Exception as e:  # noqa: BLE001
-        written, sha = [], "none"
-        art["_error"] = str(e)[:200]
+    with CORPUS_LOCK:
+        corpus_branch(sid)
+        try:
+            written, sha = apply_files(sid, art.get("files", []), f"factory({sid}) docs")
+        except Exception as e:  # noqa: BLE001
+            written, sha = [], "none"
+            art["_error"] = str(e)[:200]
     art["_commit"] = sha
     save_artifact(sid, "docs-engineer", art, "docs-engineer")
     record_event(sid, "Documentation Complete", sha)
-    set_gate(sid, "gate:review")
-    comment(item["short_id"],
-            f"PR READY: branch factory/{sid} in corpus/ (impl {impl.get('_commit')}, docs {sha}). "
-            "Human review required.", "tpm")
-    log(f"  {sid}: Docs done -> review (PR-ready, branch factory/{sid})")
+    set_gate(sid, "gate:ci")
+    log(f"  {sid}: Docs done -> ci (push PR + watch checks)")
+
+
+def _gh_api(path):
+    """Unauthenticated GitHub API GET (public repos); uses GITHUB_TOKEN if set."""
+    req = urllib.request.Request(
+        f"https://api.github.com{path}",
+        headers={"User-Agent": "software-factory", "Accept": "application/vnd.github+json",
+                 **({"Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}"}
+                    if os.environ.get("GITHUB_TOKEN") else {})})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def corpus_slug():
+    url = corpus_git("remote", "get-url", "origin").stdout.strip()
+    m = re.search(r"github\.com[:/]([^/]+/[^/.]+)", url)
+    return m.group(1) if m else None
+
+
+def gate_ci(item):
+    """Push the branch, ensure a PR exists, watch CI checks.
+    Green -> gate:review. Failures -> ci artifact + gate:tl-review (self-heal)."""
+    sid = item["short_id"]
+    branch = f"factory/{sid}"
+    slug = corpus_slug()
+    if not slug:
+        raise RuntimeError("corpus origin is not a GitHub remote")
+    owner = slug.split("/")[0]
+    with CORPUS_LOCK:
+        head_sha = corpus_git("rev-parse", branch).stdout.strip()
+        # 1. Push (works when the GB10 has credentials; otherwise needs a relay).
+        push = corpus_git("push", "origin", f"{branch}:{branch}", check=False)
+    pushed = push.returncode == 0
+
+    # 2. Find the PR for this branch.
+    prs = _gh_api(f"/repos/{slug}/pulls?head={owner}:{branch}&state=open")
+    if not prs:
+        msg = (f"branch {branch} @ {head_sha[:7]} is ready but no PR exists"
+               + ("" if pushed else " and push failed (no GitHub credentials on this host)")
+               + f". Relay: git push origin {branch} && gh pr create --head {branch}")
+        comment(sid, f"[devops-qa] CI gate waiting: {msg}", "devops-qa")
+        log(f"  {sid}: CI waiting — {msg[:120]}")
+        return  # stay at gate:ci; retried next cycle
+    pr = prs[0]
+    pr_sha = pr["head"]["sha"]
+    if pr_sha != head_sha and not pushed:
+        log(f"  {sid}: CI waiting — PR #{pr['number']} is at {pr_sha[:7]} but local is "
+            f"{head_sha[:7]}; push needed (relay: git push origin {branch})")
+        return
+
+    # 3. Aggregate check runs for the PR head.
+    runs = _gh_api(f"/repos/{slug}/commits/{pr_sha}/check-runs").get("check_runs", [])
+    pending = [r for r in runs if r.get("status") != "completed"]
+    if not runs or pending:
+        log(f"  {sid}: CI pending on PR #{pr['number']} "
+            f"({len(pending)}/{len(runs)} checks still running)")
+        return  # stay at gate:ci
+    failed = [r for r in runs if r.get("conclusion") not in ("success", "neutral", "skipped")]
+    if not failed:
+        record_event(sid, "CI Passed", pr_sha[:7])
+        set_gate(sid, "gate:review")
+        comment(sid, f"[devops-qa] CI GREEN on PR #{pr['number']} ({len(runs)} checks). "
+                     f"PR READY for human review: {pr['html_url']}", "devops-qa")
+        log(f"  {sid}: CI GREEN ({len(runs)} checks) -> review  {pr['html_url']}")
+        return
+    art = {"pr": pr["number"], "pr_url": pr["html_url"], "sha": pr_sha,
+           "failed_checks": [{"name": r["name"],
+                              "summary": ((r.get("output") or {}).get("summary") or
+                                          (r.get("output") or {}).get("title") or "")[:500],
+                              "url": r.get("html_url")} for r in failed]}
+    save_artifact(sid, f"ci-{int(time.time())}", art, "devops-qa")
+    record_event(sid, "CI Failed", ",".join(r["name"] for r in failed)[:100])
+    set_gate(sid, "gate:tl-review")
+    log(f"  {sid}: CI FAILED ({', '.join(r['name'] for r in failed)}) -> tl-review")
 
 
 HANDLERS = {
     "intake": gate_intake, "scoped": gate_scoped, "designed": gate_designed,
-    "implement": gate_implement, "qa": gate_qa, "tl-review": gate_tl_review, "docs": gate_docs,
+    "implement": gate_implement, "qa": gate_qa, "tl-review": gate_tl_review,
+    "docs": gate_docs, "ci": gate_ci,
 }
 
 
@@ -757,9 +892,9 @@ def check_kata_stop(item, cfg):
     """Returns (verdict, reason). verdict in PASS|HALT."""
     sid = item["short_id"]
     timeline = read_timeline(sid)
-    # Count QA-evaluated failures, not attempts started — otherwise the Nth
-    # attempt would be committed and halted before ever being tested.
-    failed = [e for e in timeline if e["event"] == "QA Failed"]
+    # Count evaluated failures (QA and CI), not attempts started — otherwise
+    # the Nth attempt would be committed and halted before ever being tested.
+    failed = [e for e in timeline if e["event"] in ("QA Failed", "CI Failed")]
     if len(failed) >= cfg["max_attempts"]:
         return "HALT", f"Retry budget exceeded ({len(failed)}/{cfg['max_attempts']} failed attempts)"
     if timeline:
@@ -843,8 +978,8 @@ def cmd_stop_check(args):
             return 1
         items = [it]
     else:
-        for lbl in ("gate:intaken", "gate:scoped", "gate:designed",
-                    "gate:implementing", "gate:qa", "gate:tl-review", "gate:documenting"):
+        for lbl in ("gate:intaken", "gate:scoped", "gate:designed", "gate:implementing",
+                    "gate:qa", "gate:tl-review", "gate:documenting", "gate:ci"):
             items += kata_list(label=lbl)
     halted = False
     for it in items:
@@ -943,6 +1078,35 @@ def cmd_gate(args):
             comment(it["short_id"], f"[{role}] gate {args.gate} ERROR: {str(e)[:400]}", role)
             log(f"└─ {it['short_id']}: ERROR in {args.gate} after {time.time() - t0:.0f}s: {str(e)[:200]}")
     return 0
+
+
+# ---------- two-lane cycle: heavy work + light planning in parallel ----------
+
+HEAVY_GATES = ["implement", "qa", "docs", "ci"]     # corpus-locked, big generations
+LIGHT_GATES = ["intake", "scoped", "designed", "tl-review"]  # planning artifacts
+
+
+def cmd_cycle(args):
+    """One orchestration cycle with two concurrent lanes. vLLM batches the
+    concurrent requests; the corpus working tree is serialized by CORPUS_LOCK."""
+    errors = []
+
+    def run_lane(gates):
+        for g in gates:
+            try:
+                ns = argparse.Namespace(gate=g, limit=args.limit, katas=args.katas)
+                cmd_gate(ns)
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{g}: {str(e)[:200]}")
+    lanes = [threading.Thread(target=run_lane, args=(HEAVY_GATES,), name="heavy"),
+             threading.Thread(target=run_lane, args=(LIGHT_GATES,), name="light")]
+    for t in lanes:
+        t.start()
+    for t in lanes:
+        t.join()
+    for e in errors:
+        log(f"lane error: {e}")
+    return 1 if errors else 0
 
 
 # ---------- status / evidence ----------
@@ -1071,18 +1235,19 @@ def cmd_baseline(args):
         "including tests), notes (str), test_command (str starting with 'uv run pytest').",
         f"ISSUE: {it['title']}\n\n{it.get('body', '')[:6000]}\n\nREPO FILE TREE:\n" + repo_tree(),
         sid, ["files", "notes", "test_command"], max_tokens=16384)
-    corpus_branch(sid, prefix="baseline")
-    written, sha = apply_files(sid, art["files"], f"baseline({sid}): {it['title'][:60]}")
-    cmd = art.get("test_command", "uv run pytest tests/ -x -q")
-    if not isinstance(cmd, str) or not cmd.startswith("uv run pytest"):
-        cmd = "uv run pytest tests/ -x -q"
-    try:
-        r = subprocess.run([UV_BIN, "run", "--extra", "test"] + cmd.split()[2:], cwd=CORPUS,
-                           capture_output=True, text=True, timeout=900)
-        passed = r.returncode == 0
-        tail = (r.stdout + r.stderr)[-2000:]
-    except subprocess.TimeoutExpired:
-        passed, tail = False, "TIMEOUT"
+    with CORPUS_LOCK:
+        corpus_branch(sid, prefix="baseline")
+        written, sha = apply_files(sid, art["files"], f"baseline({sid}): {it['title'][:60]}")
+        cmd = art.get("test_command", "uv run pytest tests/ -x -q")
+        if not isinstance(cmd, str) or not cmd.startswith("uv run pytest"):
+            cmd = "uv run pytest tests/ -x -q"
+        try:
+            r = subprocess.run([UV_BIN, "run", "--extra", "test"] + cmd.split()[2:], cwd=CORPUS,
+                               capture_output=True, text=True, timeout=900)
+            passed = r.returncode == 0
+            tail = (r.stdout + r.stderr)[-2000:]
+        except subprocess.TimeoutExpired:
+            passed, tail = False, "TIMEOUT"
     result = {"kata": sid, "branch": f"baseline/{sid}", "commit": sha,
               "passed": passed, "wall_seconds": round(time.time() - t0, 1),
               "files": written, "output_tail": tail}
@@ -1103,6 +1268,9 @@ def main():
     g.add_argument("--gate", required=True, choices=list(GATE_ROLE))
     g.add_argument("--limit", type=int, default=3)
     g.add_argument("--katas")
+    c = sub.add_parser("cycle")
+    c.add_argument("--limit", type=int, default=3)
+    c.add_argument("--katas")
     i = sub.add_parser("intake")
     i.add_argument("--katas")
     i.add_argument("--limit", type=int, default=2)
@@ -1117,8 +1285,8 @@ def main():
     a.add_argument("--prompt", required=True)
     a.add_argument("--tag", default="artifact")
     args = ap.parse_args()
-    fns = {"gate": cmd_gate, "intake": cmd_intake, "stop-check": cmd_stop_check,
-           "heartbeat": cmd_heartbeat, "status": cmd_status,
+    fns = {"gate": cmd_gate, "cycle": cmd_cycle, "intake": cmd_intake,
+           "stop-check": cmd_stop_check, "heartbeat": cmd_heartbeat, "status": cmd_status,
            "evidence": cmd_evidence, "baseline": cmd_baseline, "artifact": cmd_artifact}
     sys.exit(fns[args.cmd](args))
 

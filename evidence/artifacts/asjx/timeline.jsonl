@@ -5,3 +5,4 @@
 {"ts": "2026-07-26T22:45:55.121094+00:00", "event": "Implementation Attempt 1", "detail": "6182778 files=['petri/cli/__init__.py', 'tests/integration/test_cli.py']"}
 {"ts": "2026-07-26T22:45:55.944084+00:00", "event": "QA Passed", "detail": ""}
 {"ts": "2026-07-26T22:46:50.430780+00:00", "event": "Documentation Complete", "detail": "7b6bce5"}
+{"ts": "2026-07-27T00:18:28.499725+00:00", "event": "CI Failed", "detail": "lint,typecheck"}

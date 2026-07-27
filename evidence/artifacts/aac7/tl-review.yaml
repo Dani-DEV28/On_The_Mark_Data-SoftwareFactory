@@ -1,0 +1,13 @@
+diagnosis: 'Missing `pydantic-ai` dependency. The test collection fails with `ModuleNotFoundError: No
+  module named ''pydantic_ai''` because the package is not listed in `pyproject.toml` and not installed
+  in the virtual environment.'
+revised_task:
+  objective: Add `pydantic-ai` to project dependencies and ensure it is installed.
+  constraints:
+  - Add `pydantic-ai` to `[project.dependencies]` in `pyproject.toml`.
+  - Run `uv sync` to update the environment.
+guidance: '1. Edit `pyproject.toml` and add `pydantic-ai` to the `[project.dependencies]` list. 2. Run
+  `uv sync` in the terminal to install the package. 3. Re-run the failing tests: `uv run pytest tests/test_pi_model.py
+  tests/test_harness.py -v`. 4. If `pydantic-ai` requires a specific version or pre-release flag, adjust
+  the dependency string accordingly (e.g., `pydantic-ai>=0.0.1`). The architect noted it as ''existing'',
+  but it was not added to the manifest.'

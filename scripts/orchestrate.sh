@@ -39,36 +39,36 @@ while true; do
     CYCLE_START=$(date +%s)
     echo ""
     echo "━━━ cycle $cycle — $(date '+%H:%M:%S') ━━━"
-    for gate in intake scoped designed implement qa tl-review docs; do
-        $PY gate --gate "$gate" --limit "$LIMIT" ${KATAS:+--katas "$KATAS"}
-        # Exit codes: 0=PASS, 2=per-kata HALT (quarantined at gate:halted,
-        # incident report written — factory continues), 3=manual [stop] kata
-        # (whole-factory stop), 1=stop-check itself failed.
-        "$FACTORY_DIR/scripts/stop-gap.sh" check
-        rc=$?
-        if [ "$rc" -eq 3 ]; then
-            echo "TPM FULL STOP — manual [stop] kata on board; stopping the factory"
-            exit 2
-        elif [ "$rc" -eq 2 ]; then
-            echo "TPM: kata(s) quarantined at gate:halted (see evidence/incidents/); continuing"
-            stopcheck_errs=0
-        elif [ "$rc" -ne 0 ]; then
-            stopcheck_errs=$((stopcheck_errs + 1))
-            echo "WARN: stop-check error rc=$rc (${stopcheck_errs} consecutive) — continuing"
-            if [ "$stopcheck_errs" -ge 3 ]; then
-                echo "TPM HALT — stop-check itself is failing; halting as fail-safe"
-                exit 3
-            fi
-        else
-            stopcheck_errs=0
+    # Two concurrent lanes: heavy (implement/qa/docs/ci, corpus-locked) and
+    # light (intake/scoped/designed/tl-review). vLLM batches their requests.
+    $PY cycle --limit "$LIMIT" ${KATAS:+--katas "$KATAS"}
+    # Exit codes: 0=PASS, 2=per-kata HALT (quarantined at gate:halted,
+    # incident report written — factory continues), 3=manual [stop] kata
+    # (whole-factory stop), 1=stop-check itself failed.
+    "$FACTORY_DIR/scripts/stop-gap.sh" check
+    rc=$?
+    if [ "$rc" -eq 3 ]; then
+        echo "TPM FULL STOP — manual [stop] kata on board; stopping the factory"
+        exit 2
+    elif [ "$rc" -eq 2 ]; then
+        echo "TPM: kata(s) quarantined at gate:halted (see evidence/incidents/); continuing"
+        stopcheck_errs=0
+    elif [ "$rc" -ne 0 ]; then
+        stopcheck_errs=$((stopcheck_errs + 1))
+        echo "WARN: stop-check error rc=$rc (${stopcheck_errs} consecutive) — continuing"
+        if [ "$stopcheck_errs" -ge 3 ]; then
+            echo "TPM HALT — stop-check itself is failing; halting as fail-safe"
+            exit 3
         fi
-    done
+    else
+        stopcheck_errs=0
+    fi
     $PY heartbeat
     $PY status
     echo "━━━ cycle $cycle done in $(( $(date +%s) - CYCLE_START ))s (run total $(( $(date +%s) - RUN_START ))s) ━━━"
 
     # Done when nothing is active in the working gates
-    active=$($PY status | grep -cE "gate:(intaken|scoped|designed|implementing|qa|tl-review|documenting) " || true)
+    active=$($PY status | grep -cE "gate:(intaken|scoped|designed|implementing|qa|tl-review|documenting|ci) " || true)
     if [ "$active" -eq 0 ]; then
         echo ""
         echo "╔══════════════════════════════════════════════════════════════"

@@ -1,0 +1,10 @@
+pr: 122
+pr_url: https://github.com/onthemarkdata/petri/pull/122
+sha: 7b6bce5a8e7bdb3b2f46dd9cc48f36e1e4f42a21
+failed_checks:
+- name: lint
+  summary: ''
+  url: https://github.com/onthemarkdata/petri/actions/runs/30226793809/job/89858210787
+- name: typecheck
+  summary: ''
+  url: https://github.com/onthemarkdata/petri/actions/runs/30226793809/job/89858210782

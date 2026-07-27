@@ -725,7 +725,6 @@ def gate_qa(item):
     out = out[-7000:]
     qa_view.done("tests+lint green ✓" if passed else "checks FAILED ✗")
     cmd = " && ".join(l for l, _ in runs)
-    cmd = " && ".join(runs)
     failures = re.findall(r"^(FAILED|ERROR) (\S+)", out, re.MULTILINE)
     failures += [("LINT", m) for m in re.findall(r"^(\S+\.py:\d+:\d+: \S+ .{0,80})", out, re.MULTILINE)][:10]
     failures += [("TYPE", m) for m in re.findall(r"^(\S+\.py:\d+: error: .{0,80})", out, re.MULTILINE)][:10]

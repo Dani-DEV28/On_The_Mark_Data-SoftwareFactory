@@ -13,6 +13,10 @@ set -euo pipefail
 FACTORY_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SWAP_URL="${SFAI_INFERENCE_URL:-http://localhost:9292}"
 REPO_URL=""
+# Pin the real kenn-io kata binary — a Click-based PyPI 'kata' can shadow it on PATH.
+KATA_BIN="${KATA_BIN:-$HOME/.local/bin/kata}"
+[ -x "$KATA_BIN" ] || KATA_BIN="$(command -v kata)"
+export KATA_BIN
 
 usage() {
     sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
@@ -52,7 +56,7 @@ cmd_status() {
     fi
     echo ""
     echo "--- Kata board ---"
-    (cd "$FACTORY_DIR" && kata list 2>/dev/null | tail -8) || echo "  no board — run: kata init"
+    (cd "$FACTORY_DIR" && "$KATA_BIN" list 2>/dev/null | tail -8) || echo "  no board — run: kata init"
     echo ""
     echo "--- Sandbox (NemoClaw) ---"
     if command -v nemoclaw >/dev/null 2>&1; then
@@ -68,13 +72,14 @@ cmd_run() {
 
     echo "=== sfai run — $slug ==="
 
-    # 1. Clone/refresh corpus
+    # 1. Clone/refresh corpus. The factory manages branches inside corpus/,
+    # so we only FETCH (never pull/merge onto whatever branch it's parked on).
     if [ ! -d "$FACTORY_DIR/corpus/.git" ]; then
         echo "--- Cloning corpus ---"
         git clone "$REPO_URL" "$FACTORY_DIR/corpus"
     else
-        echo "--- Refreshing corpus ---"
-        git -C "$FACTORY_DIR/corpus" pull --ff-only || echo "WARNING: corpus pull failed; using existing checkout"
+        echo "--- Refreshing corpus (fetch) ---"
+        git -C "$FACTORY_DIR/corpus" fetch --quiet origin || echo "WARNING: corpus fetch failed; using existing refs"
     fi
 
     # 2. Fetch open issues from GitHub
@@ -85,11 +90,12 @@ cmd_run() {
 
     # 3. Create katas with full issue bodies (idempotent via gh-<n> key)
     echo "--- Creating katas ---"
-    echo "$issues_json" | FACTORY_DIR="$FACTORY_DIR" python3 -c '
+    echo "$issues_json" | FACTORY_DIR="$FACTORY_DIR" KATA_BIN="$KATA_BIN" python3 -c '
 import json, os, subprocess, sys
 factory = os.environ["FACTORY_DIR"]
+kata_bin = os.environ.get("KATA_BIN") or "kata"
 def kata(*a, **kw):
-    return subprocess.run(["kata", *a], cwd=factory, capture_output=True, text=True, **kw)
+    return subprocess.run([kata_bin, *a], cwd=factory, capture_output=True, text=True, **kw)
 existing = kata("list", "--json").stdout
 created = skipped = 0
 for i in json.load(sys.stdin):

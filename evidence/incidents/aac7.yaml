@@ -1,0 +1,35 @@
+Factory Incident Report: null
+Issue: '#aac7 [bug] gh-120: Wire up the pi harness end-to-end'
+Status: Stopped
+Reason: Runtime limit exceeded (54m > 45m)
+Attempts: 2
+Elapsed: 54 minutes
+Agents:
+- Tech Lead
+- Product Manager
+- Architect
+- Implementer
+- QA
+Timeline:
+- Intaken
+- Analysis Complete
+- Planning Complete
+- architect Failed
+- Architecture Complete
+- Implementation Attempt 1
+- QA Failed
+- Retry
+- Implementation Attempt 2
+Observed Errors:
+- ERROR tests/test_pi_model.py
+- ERROR tests/test_harness.py
+Repeated Failure: ERROR tests/test_pi_model.py
+Artifacts:
+- architect.yaml
+- implementer.yaml
+- product-manager.yaml
+- qa-1785110447.yaml
+- tech-lead.yaml
+- timeline.jsonl
+- tl-review.yaml
+Recommendation: Human intervention required.

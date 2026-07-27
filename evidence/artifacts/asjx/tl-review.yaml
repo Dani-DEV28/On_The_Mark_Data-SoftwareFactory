@@ -1,0 +1,15 @@
+diagnosis: CI failed on lint and typecheck checks. Local tests passed, confirming the logic works, but
+  static analysis tools caught issues. The primary suspect is a missing import for `typer.Exit` in `petri/cli/__init__.py`,
+  which causes a `NameError` at runtime and fails type checking. Secondary suspects include unused imports,
+  formatting violations, or type hint mismatches introduced during implementation.
+revised_task:
+  objective: Resolve CI lint and typecheck failures for the `--version` CLI feature.
+  constraints:
+  - Explicitly import `typer.Exit` in `petri/cli/__init__.py`.
+  - Run local lint and typecheck commands (e.g., `uv run ruff check` and `uv run mypy`) to replicate CI.
+  - Fix all reported warnings/errors before pushing.
+  - Ensure no unused imports or type mismatches remain.
+guidance: Add `from typer import Exit` to the imports in `petri/cli/__init__.py`. Use `Exit()` in the
+  callback. Run the linter and type checker locally to verify fixes. Check the PR diff for any other static
+  analysis complaints. The implementation logic is sound; this is purely a static analysis compliance
+  fix.

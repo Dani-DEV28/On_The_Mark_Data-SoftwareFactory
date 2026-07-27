@@ -1,9 +1,9 @@
 Factory Incident Report: null
 Issue: '#asjx [bug] gh-117: Wire `petri --version` into the CLI'
 Status: Stopped
-Reason: Runtime limit exceeded (101m > 45m)
-Attempts: 1
-Elapsed: 101 minutes
+Reason: No progress for 4 heartbeat cycles
+Attempts: 2
+Elapsed: 110 minutes
 Agents:
 - Tech Lead
 - Product Manager
@@ -20,6 +20,9 @@ Timeline:
 - Documentation Complete
 - CI Failed
 - Retry
+- Implementation Attempt 2
+- QA Passed
+- Documentation Complete
 Observed Errors: []
 Repeated Failure: none
 Artifacts:
@@ -28,6 +31,7 @@ Artifacts:
 - implementer.yaml
 - product-manager.yaml
 - qa-1785105955.yaml
+- qa-1785112095.yaml
 - tech-lead.yaml
 - timeline.jsonl
 - tl-review.yaml

@@ -3,18 +3,20 @@ files:
   content: '# Changelog
 
 
+    All notable changes to this project will be documented in this file.
+
+
     ## [Unreleased]
 
 
     ### Added
 
-    - `petri --version` flag to print the installed version and exit immediately.
+    - `petri --version` flag to print the installed version and exit immediately. (#kata-asjx)
 
     '
 - path: README.md
-  content: "# Petri\n\nA CLI tool for managing petri-dish-like workflows.\n\n## Usage\n\n  ```bash\n \
-    \ petri [OPTIONS] COMMAND [ARGS]...\n\n  Options:\n    --version   Show the Petri version and exit.\n\
-    \    --help      Show this message and exit.\n\n  Commands:\n    init    Initialize a new project.\n\
-    \    run     Execute a workflow.\n  ```\n\n## Installation\n\n...\n"
-summary: Updated CHANGELOG and README to document the new `petri --version` CLI flag.
-_commit: 7b6bce5
+  content: "# Petri\n\nOne-line description.\n\n## Installation\n  ```bash\n  pip install -e .\n  ```\n\
+    \n## Usage\nCheck the installed version:\n  ```bash\n  petri --version\n  ```\n\n## Configuration\n\
+    <!-- New CLI flags, env vars, config options -->\n\n## Development\n  ```bash\n  pytest\n  ```\n"
+summary: Updated CHANGELOG with kata ID and added --version usage to README.
+_commit: 35d0351
